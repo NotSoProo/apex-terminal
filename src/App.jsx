@@ -1195,48 +1195,98 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
     <div>
       <SummaryBar />
       <FilterBar />
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {filtered.map(t => {
           const m = calcMetrics(t); const cur = t.platform === "AB" ? "₹" : "$";
-          const sColor = t.status === "Open" ? C.green : t.status === "Closed" ? C.textD : C.amber;
-          const displayPnl = t.status === "Closed" ? m.pnl : m.livePnl;
+          const isOpen = t.status === "Open";
+          const isPending = t.status === "Pending";
+          const isClosed = t.status === "Closed";
+          const sColor = isOpen ? C.green : isClosed ? C.textD : C.amber;
+          const displayPnl = isClosed ? m.pnl : m.livePnl;
+          const pnlColor = (displayPnl || 0) > 0 ? C.green : (displayPnl || 0) < 0 ? C.red : C.textD;
           return (
-            <Card key={t.id} padding={14}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                <div><div style={{ fontSize: 14, fontWeight: 600 }}>{t.market}{t.parentId && <span style={{ color: C.amber, fontSize: 9, marginLeft: 6 }}>↗</span>}</div><div style={{ fontSize: 10, color: C.textD, fontFamily: F_MONO, marginTop: 2 }}>{t.platform === "AB" ? "AB" : "Exness"} · {t.date.slice(5)}{t.status === "Open" ? ` · ${timeSince(t.date)} open` : ""} · <span style={{ color: t.direction === "Long" ? C.green : C.red }}>{t.direction}</span></div></div>
-                <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 3, background: sColor + "20", color: sColor, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600, flexShrink: 0 }}>{t.status}</span>
+            <div key={t.id} style={{ background: C.surface, border: `1px solid ${isOpen ? C.border : C.dim}`, borderRadius: 10, overflow: "hidden" }}>
+              {/* Header */}
+              <div style={{ padding: "14px 16px", borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 17, fontWeight: 700, color: C.text, letterSpacing: 0.3 }}>{t.market}{t.parentId && <span style={{ color: C.amber, fontSize: 11, marginLeft: 6 }}>↗</span>}</div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 3, alignItems: "center" }}>
+                        <span style={{ fontSize: 12, color: t.direction === "Long" ? C.green : C.red, fontWeight: 600 }}>{t.direction}</span>
+                        <span style={{ fontSize: 11, color: C.textD }}>·</span>
+                        <span style={{ fontSize: 11, color: C.textD }}>{t.platform === "AB" ? "AB" : "Exness"}</span>
+                        <span style={{ fontSize: 11, color: C.textD }}>·</span>
+                        <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>{t.date.slice(5)}{isOpen ? ` · ${timeSince(t.date)}` : ""}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                    <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: sColor + "20", color: sColor, fontWeight: 600 }}>{t.status}</span>
+                    {displayPnl !== null && displayPnl !== undefined && (
+                      <span style={{ fontSize: 15, fontFamily: F_MONO, fontWeight: 700, color: pnlColor }}>{dAmt(displayPnl, cur, hideCapital)}</span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
-                {[["ENTRY", t.entry, C.text], ["SL", `${t.currentSL || t.stopLoss}${m.slAtBE ? " BE" : ""}`, m.slAtBE ? C.green : C.text], ["TARGET", t.target || "—", C.text], ["QTY", t.qty, C.text], ["R:R", m.rr ? `1:${m.rr}` : "—", m.rr >= 3 ? C.green : m.rr > 0 ? C.amber : C.textD], ["P&L", displayPnl !== null && displayPnl !== undefined ? dAmt(displayPnl, cur, hideCapital) : "—", (displayPnl || 0) > 0 ? C.green : (displayPnl || 0) < 0 ? C.red : C.textD]].map(([label, val, color]) => (
-                  <div key={label} style={{ background: C.surface2, borderRadius: 4, padding: "6px 8px" }}><div style={{ fontSize: 9, color: C.textD }}>{label}</div><div style={{ fontSize: 12, color, fontFamily: F_MONO, fontWeight: label === "P&L" ? 600 : 400 }}>{val}</div></div>
+
+              {/* Price grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, background: C.border }}>
+                {[
+                  ["ENTRY", t.entry, C.text],
+                  ["STOP", `${t.currentSL || t.stopLoss}${m.slAtBE ? " ✓BE" : ""}`, m.slAtBE ? C.green : C.textM],
+                  ["TARGET", t.target || "—", C.textM],
+                  ["LOTS", t.qty, C.text],
+                  ["R:R", m.rr ? `1:${m.rr}` : "—", m.rr >= 3 ? C.green : m.rr > 0 ? C.amber : C.textD],
+                  ["RISK", m.riskAmt > 0 ? dAmt(m.riskAmt, cur, hideCapital) : (m.slAtBE ? "0 (BE)" : "—"), m.slAtBE ? C.green : C.textM],
+                ].map(([label, val, color]) => (
+                  <div key={label} style={{ background: C.surface2, padding: "10px 12px" }}>
+                    <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 14, color, fontFamily: F_MONO, fontWeight: 600 }}>{val}</div>
+                  </div>
                 ))}
               </div>
-              {t.status === "Open" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-                  <div>
-                    <div style={{ fontSize: 9, color: C.textD, marginBottom: 4, letterSpacing: 1 }}>CMP (live P&L)</div>
-                    <input type="number" value={t.cmp || ""} onChange={e => updateCMP(t.id, e.target.value)} placeholder="Current price" style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 4, padding: "7px 10px", fontSize: 12, fontFamily: F_MONO, width: "100%", boxSizing: "border-box", outline: "none" }} />
-                    {m.liveR !== null && <div style={{ fontSize: 10, color: m.liveR >= 0 ? C.green : C.red, fontFamily: F_MONO, marginTop: 3 }}>{m.liveR >= 0 ? "+" : ""}{m.liveR}R live</div>}
-                  </div>
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>CURRENT SL</div>
-                      {!m.slAtBE && m.bePrice > 0 && <button onClick={() => updateSL(t.id, m.bePrice.toFixed(2))} style={{ fontSize: 9, padding: "2px 6px", background: C.amber + "20", border: `1px solid ${C.amber}40`, color: C.amber, borderRadius: 3, cursor: "pointer", fontFamily: F_UI, fontWeight: 600 }}>→ BE ({m.bePrice?.toFixed(2)})</button>}
+
+              {/* Live tracking — open trades only */}
+              {isOpen && (
+                <div style={{ padding: "12px 16px", borderTop: `1px solid ${C.border}` }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: C.textD, marginBottom: 6, letterSpacing: 0.5 }}>Current Price (CMP)</div>
+                      <input type="number" value={t.cmp || ""} onChange={e => updateCMP(t.id, e.target.value)} placeholder="Enter to track P&L" style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "10px 12px", fontSize: 14, fontFamily: F_MONO, width: "100%", boxSizing: "border-box", outline: "none" }} />
+                      {m.liveR !== null && (
+                        <div style={{ display: "flex", gap: 8, marginTop: 5 }}>
+                          <span style={{ fontSize: 12, color: m.liveR >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600 }}>{m.liveR >= 0 ? "+" : ""}{m.liveR}R</span>
+                          <span style={{ fontSize: 12, color: pnlColor, fontFamily: F_MONO }}>{dAmt(displayPnl, cur, hideCapital)}</span>
+                        </div>
+                      )}
                     </div>
-                    <input type="number" value={t.currentSL || ""} onChange={e => updateSL(t.id, e.target.value)} placeholder="Move to BE?" style={{ background: C.surface2, border: `1px solid ${m.slAtBE ? C.green : C.border}`, color: C.text, borderRadius: 4, padding: "7px 10px", fontSize: 12, fontFamily: F_MONO, width: "100%", boxSizing: "border-box", outline: "none" }} />
-                    {m.slAtBE && <div style={{ fontSize: 10, color: C.green, marginTop: 3 }}>✓ SL at entry — no loss possible</div>}
-                    {!m.slAtBE && m.oneRLevel > 0 && +t.cmp >= m.oneRLevel && t.direction === "Long" && <div style={{ fontSize: 10, color: C.amber, marginTop: 3 }}>At 1R — move SL to entry ({m.bePrice?.toFixed(2)})</div>}
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <div style={{ fontSize: 11, color: C.textD }}>Stop Loss (current)</div>
+                        {!m.slAtBE && m.bePrice > 0 && (
+                          <button onClick={() => updateSL(t.id, m.bePrice.toFixed(2))} style={{ fontSize: 10, padding: "3px 8px", background: C.amber + "25", border: `1px solid ${C.amber}50`, color: C.amber, borderRadius: 4, cursor: "pointer", fontWeight: 700 }}>→ BE</button>
+                        )}
+                      </div>
+                      <input type="number" value={t.currentSL || ""} onChange={e => updateSL(t.id, e.target.value)} placeholder={`Move to ${m.bePrice > 0 ? m.bePrice.toFixed(2) : "entry"}`} style={{ background: C.surface2, border: `1.5px solid ${m.slAtBE ? C.green : C.border}`, color: C.text, borderRadius: 6, padding: "10px 12px", fontSize: 14, fontFamily: F_MONO, width: "100%", boxSizing: "border-box", outline: "none" }} />
+                      {m.slAtBE && <div style={{ fontSize: 11, color: C.green, marginTop: 5, fontWeight: 600 }}>✓ At breakeven — free trade</div>}
+                      {!m.slAtBE && m.oneRLevel > 0 && t.cmp && +t.cmp >= m.oneRLevel && (
+                        <div style={{ fontSize: 11, color: C.amber, marginTop: 5 }}>Price at 1R — move SL to entry now</div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {t.status === "Pending" && <Btn variant="success" onClick={() => activate(t.id)} size="sm">Activate</Btn>}
-                {t.status === "Open" && <Btn variant="danger" onClick={() => setCloseTrade(t)} size="sm">Close</Btn>}
-                {t.status === "Open" && !t.parentId && <Btn onClick={() => setPyramidTrade(t)} size="sm" style={{ color: C.amber, borderColor: C.amber + "60" }}>+ Pyramid</Btn>}
-                <Btn onClick={() => setEditTrade(t)} size="sm">Edit</Btn>
+
+              {/* Actions */}
+              <div style={{ padding: "10px 16px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {isPending && <Btn variant="success" onClick={() => activate(t.id)} size="md" style={{ flex: 1 }}>Activate</Btn>}
+                {isOpen && <Btn variant="danger" onClick={() => setCloseTrade(t)} size="md" style={{ flex: 1 }}>Close Trade</Btn>}
+                {isOpen && !t.parentId && <Btn onClick={() => setPyramidTrade(t)} size="md" style={{ color: C.amber, borderColor: C.amber + "50", flex: 1 }}>+ Pyramid</Btn>}
+                <Btn onClick={() => setEditTrade(t)} size="md" style={{ flex: 1 }}>Edit</Btn>
                 <Btn variant="danger" onClick={() => del(t.id)} size="sm">×</Btn>
               </div>
-            </Card>
+            </div>
           );
         })}
       </div>
@@ -1828,7 +1878,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
       )}
 
       {/* ── INPUTS ── */}
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 18, marginBottom: 14 }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 18, marginBottom: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <Label>Position Size Calculator</Label>
           <div style={{ fontSize: 10, color: C.textD }}>Risk on {dAmt(totalCapInr, "₹", hideCapital)} total</div>
@@ -1913,7 +1963,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
 
       {/* ── RESULT CARDS ── */}
       {qty > 0 && diff > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 2 }}>
           {/* Risk row */}
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 10 }}>
             <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, padding: 14 }}>
