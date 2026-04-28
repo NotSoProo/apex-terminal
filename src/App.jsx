@@ -460,7 +460,7 @@ export default function ApexTerminal() {
 
         <div style={{ padding: isMobile ? "16px" : "28px" }}>
           {page === "dashboard" && <Dashboard metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} combined={combined} inrTotal={inrTotal} usdTotal={usdTotal} isMobile={isMobile} />}
-          {page === "positions" && <Positions trades={trades} saveTrades={saveTrades} setEditTrade={setEditTrade} setPyramidTrade={setPyramidTrade} setCloseTrade={setCloseTrade} hideCapital={hideCapital} isMobile={isMobile} metrics={metrics} />}
+          {page === "positions" && <Positions trades={trades} saveTrades={saveTrades} setEditTrade={setEditTrade} setPyramidTrade={setPyramidTrade} setCloseTrade={setCloseTrade} hideCapital={hideCapital} isMobile={isMobile} metrics={metrics} settings={settings} />}
           {page === "holdings" && <Holdings settings={settings} saveSettings={saveSettings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} />}
           {page === "addtrade" && <AddTrade trades={trades} saveTrades={saveTrades} settings={settings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} />}
           {page === "journal" && <Journal trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} isMobile={isMobile} />}
@@ -1137,7 +1137,7 @@ function Dashboard({ metrics, settings, trades, hideCapital, combined, inrTotal,
   );
 }
 
-function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setCloseTrade, hideCapital, isMobile, metrics }) {
+function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setCloseTrade, hideCapital, isMobile, metrics, settings }) {
   const [filter, setFilter] = useState("All");
   const [pf, setPf] = useState("All");
   const filtered = trades.filter(t => (filter === "All" || t.status === filter) && (pf === "All" || t.platform === pf));
@@ -1154,11 +1154,46 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
     </div>
   );
 
-  if (filtered.length === 0) return <div><FilterBar /><Card><div style={{ padding: 40, textAlign: "center", color: C.textD, fontSize: 13 }}>No trades match these filters</div></Card></div>;
+  // Summary stats for open trades
+  const openTrades = trades.filter(t => t.status === "Open");
+  const totalLivePnl = openTrades.reduce((a, t) => {
+    const m = calcMetrics(t);
+    return a + (m.livePnl !== null ? (t.platform === "AB" ? m.livePnl : m.livePnl * settings.fxRate) : 0);
+  }, 0);
+  const totalActiveRisk = metrics.openWithRiskCount;
+  const hasCMP = openTrades.some(t => t.cmp);
+
+  const SummaryBar = () => openTrades.length > 0 ? (
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(4, 1fr)", gap: 8, marginBottom: 14 }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: "10px 14px" }}>
+        <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>OPEN</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: C.text, fontFamily: F_MONO, marginTop: 4 }}>{openTrades.length}</div>
+        <div style={{ fontSize: 9, color: C.textD }}>trades total</div>
+      </div>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: "10px 14px" }}>
+        <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>ACTIVE RISK</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: totalActiveRisk >= 5 ? C.red : totalActiveRisk >= 3 ? C.amber : C.text, fontFamily: F_MONO, marginTop: 4 }}>{totalActiveRisk}/5</div>
+        <div style={{ fontSize: 9, color: C.textD }}>trades at risk</div>
+      </div>
+      <div style={{ background: C.surface, border: `1px solid ${hasCMP ? (totalLivePnl >= 0 ? C.green + "40" : C.red + "40") : C.border}`, borderRadius: 6, padding: "10px 14px" }}>
+        <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>LIVE P&L</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: !hasCMP ? C.textD : totalLivePnl >= 0 ? C.green : C.red, fontFamily: F_MONO, marginTop: 4 }}>{hasCMP ? dAmt(totalLivePnl, "₹", hideCapital) : "—"}</div>
+        <div style={{ fontSize: 9, color: C.textD }}>{hasCMP ? "update CMP for live" : "enter CMP to track"}</div>
+      </div>
+      {!isMobile && <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6, padding: "10px 14px" }}>
+        <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>RISK AMOUNT</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: C.text, fontFamily: F_MONO, marginTop: 4 }}>{dAmt(metrics.openInrRisk, "₹", hideCapital)}</div>
+        <div style={{ fontSize: 9, color: C.textD }}>{metrics.totalRiskPct.toFixed(2)}% of capital</div>
+      </div>}
+    </div>
+  ) : null;
+
+  if (filtered.length === 0) return <div><SummaryBar /><FilterBar /><Card><div style={{ padding: 40, textAlign: "center", color: C.textD, fontSize: 13 }}>No trades match these filters</div></Card></div>;
 
   // MOBILE: card layout
   if (isMobile) return (
     <div>
+      <SummaryBar />
       <FilterBar />
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {filtered.map(t => {
@@ -1211,6 +1246,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
   // DESKTOP: table
   return (
     <div>
+      <SummaryBar />
       <FilterBar />
       <Card padding={0}>
         <div style={{ overflowX: "auto" }}>
@@ -1700,51 +1736,61 @@ function Rules({ metrics }) {
 }
 
 function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobile, recommendedRisk }) {
-  const [c, setC] = useState({ platform: "AB", entry: "", sl: "", riskPct: recommendedRisk, rr: 3, market: "MCX Gold Mini", direction: "Long", multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"], marginPerLot: "" });
+  const [c, setC] = useState({
+    platform: "AB", entry: "", sl: "", riskPct: recommendedRisk, rr: 3,
+    market: "MCX Gold Mini", direction: "Long",
+    multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"], marginPerLot: "",
+    manualLots: "", // for reverse mode
+  });
+  const [mode, setMode] = useState("auto"); // "auto" = risk%→lots | "manual" = lots→risk%
 
-  const onMarketChange = (newMarket) => {
-    const newMult = CONTRACT_MULTIPLIERS[newMarket] !== undefined ? CONTRACT_MULTIPLIERS[newMarket] : 1;
-    setC({ ...c, market: newMarket, multiplier: newMult });
-  };
-  const onPlatformChange = (newPlatform) => {
-    const newMarket = newPlatform === "AB" ? MARKETS_INR[0] : MARKETS_USD[0];
-    const newMult = CONTRACT_MULTIPLIERS[newMarket] !== undefined ? CONTRACT_MULTIPLIERS[newMarket] : 1;
-    setC({ ...c, platform: newPlatform, market: newMarket, multiplier: newMult });
-  };
+  const onMarketChange = (m) => setC({ ...c, market: m, multiplier: CONTRACT_MULTIPLIERS[m] !== undefined ? CONTRACT_MULTIPLIERS[m] : 1 });
+  const onPlatformChange = (p) => { const m = p === "AB" ? MARKETS_INR[0] : MARKETS_USD[0]; setC({ ...c, platform: p, market: m, multiplier: CONTRACT_MULTIPLIERS[m] !== undefined ? CONTRACT_MULTIPLIERS[m] : 1 }); };
 
-  // total capital basis — risk % is of combined capital, expressed in platform currency
   const totalCapInr = settings.inrCapital + settings.usdCapital * settings.fxRate;
   const cur = c.platform === "AB" ? "₹" : "$";
   const riskAmtInr = (totalCapInr * c.riskPct) / 100;
   const riskAmt = c.platform === "AB" ? riskAmtInr : riskAmtInr / settings.fxRate;
   const mult = +c.multiplier || 1;
   const diff = c.entry && c.sl ? Math.abs(+c.entry - +c.sl) : 0;
-  // raw qty calc
-  const rawQty = diff > 0 && mult > 0 ? (riskAmt / (diff * mult)) : 0;
-  // for AB futures/contracts → round at .75 threshold (e.g. 5.28→5, 5.80→6)
-  // for stocks/Exness → keep 2 decimals
+
   const wholeLotMarkets = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty", "Stock Futures"];
   const needsWholeLot = wholeLotMarkets.includes(c.market);
   const roundLot = (n) => (n - Math.floor(n)) >= 0.75 ? Math.ceil(n) : Math.floor(n);
-  const qty = needsWholeLot ? roundLot(rawQty) : rawQty;
-  // actual risk for the whole-lot quantity (will be ≤ riskAmt)
+
+  // AUTO mode: risk% → calculate lots
+  const rawQtyAuto = diff > 0 && mult > 0 ? (riskAmt / (diff * mult)) : 0;
+  const qtyAuto = needsWholeLot ? roundLot(rawQtyAuto) : rawQtyAuto;
+
+  // MANUAL mode: lots entered → calculate risk
+  const qtyManual = +c.manualLots || 0;
+
+  const qty = mode === "auto" ? qtyAuto : qtyManual;
   const actualRisk = qty * mult * diff;
-  // posVal: if user enters margin per lot, use that (actual capital needed) instead of full notional
+  const actualRiskPct = totalCapInr > 0 ? (actualRisk * (c.platform === "AB" ? 1 : settings.fxRate)) / totalCapInr * 100 : 0;
+
   const marginPerLot = +c.marginPerLot || 0;
   const posVal = marginPerLot > 0 ? qty * marginPerLot : qty * mult * (+c.entry || 0);
-  const notionalVal = qty * mult * (+c.entry || 0); // always calculated for leverage
-  const effectiveLeverage = (marginPerLot > 0 && qty > 0) ? (notionalVal / (qty * marginPerLot)).toFixed(1) : (actualRisk > 0 ? (notionalVal / actualRisk).toFixed(1) : 0);
+  const notionalVal = qty * mult * (+c.entry || 0);
+  const effectiveLeverage = marginPerLot > 0 && qty > 0 ? (notionalVal / (qty * marginPerLot)).toFixed(1) : "—";
   const target = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff * c.rr : +c.entry - diff * c.rr) : 0;
-  const be = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff : +c.entry - diff) : 0;
-  const partial = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff * c.rr * 0.6 : +c.entry - diff * c.rr * 0.6) : 0;
+  const oneRLevel = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff : +c.entry - diff) : 0;
+  const partialTarget = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff * c.rr * 0.6 : +c.entry - diff * c.rr * 0.6) : 0;
+
+  const showMultiplier = c.platform === "AB";
+  const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(c.market);
+  const grid2 = isMobile ? "1fr" : "1fr 1fr";
 
   const saveAsPending = () => {
     if (!c.entry || !c.sl) { alert("Need entry and stop loss"); return; }
-    if (qty <= 0) { alert("Quantity is 0 — risk is too small for this stop distance"); return; }
+    if (qty <= 0) { alert("Quantity is 0 — check entry, SL, and risk settings"); return; }
     const newTrade = {
       id: "trade_" + Date.now(), date: today(), market: c.market, platform: c.platform,
-      direction: c.direction, entry: c.entry, stopLoss: c.sl, target: target.toFixed(2),
-      qty: needsWholeLot ? qty.toString() : qty.toFixed(2), riskPct: c.riskPct, status: "Pending", setupTag: SETUP_TAGS[0],
+      direction: c.direction, entry: c.entry, stopLoss: c.sl,
+      target: target > 0 ? target.toFixed(2) : "",
+      qty: needsWholeLot ? qty.toString() : qty.toFixed(2),
+      marginPerLot: c.marginPerLot || "",
+      riskPct: c.riskPct, status: "Pending", setupTag: SETUP_TAGS[0],
       multiplier: mult,
       checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}),
       pnl: null, exitPrice: null, exitDate: null, mistakeTag: null, exitReason: null,
@@ -1753,87 +1799,168 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
     setPage("positions");
   };
 
-  const grid2 = isMobile ? "1fr" : "1fr 1fr";
-  const grid3 = isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)";
-
-  const showMultiplier = c.platform === "AB";
-  const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(c.market);
-
   return (
     <div style={{ maxWidth: 720 }}>
       {recommendedRisk < 1 && (
-        <div style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, borderRadius: 6, padding: 12, marginBottom: 16, fontSize: 12, color: C.amber }}>
-          ⚠ Drawdown active — recommended risk is {recommendedRisk}%
+        <div style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, borderRadius: 6, padding: 12, marginBottom: 14, fontSize: 12, color: C.amber }}>
+          ⚠ Drawdown active — recommended risk {recommendedRisk}%
         </div>
       )}
-      <Card>
-        <Label>Position Size Calculator</Label>
-        <div style={{ fontSize: 11, color: C.textD, marginTop: 6, marginBottom: 4 }}>Risk % is of total combined capital ({fmt(totalCapInr)})</div>
-        <div style={{ display: "grid", gridTemplateColumns: grid2, gap: 14, marginTop: 16 }}>
+
+      {/* ── PRIMARY RESULT — lots shown BIG ── */}
+      {qty > 0 && diff > 0 && (
+        <div style={{ background: C.surface, border: `2px solid ${C.accent}40`, borderRadius: 10, padding: "20px 24px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>{mode === "auto" ? "Calculated Lots" : "Manual Lots"}</div>
+            <div style={{ fontSize: 48, fontWeight: 800, color: C.accent, fontFamily: F_MONO, lineHeight: 1 }}>{needsWholeLot ? qty : qty.toFixed(2)}</div>
+            {mode === "auto" && needsWholeLot && rawQtyAuto > 0 && rawQtyAuto !== qty && (
+              <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO, marginTop: 4 }}>Exact: {rawQtyAuto.toFixed(3)} → rounded</div>
+            )}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>ACTUAL RISK</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: actualRiskPct > 2 ? C.red : actualRiskPct > 1 ? C.amber : C.green, fontFamily: F_MONO }}>{dAmt(actualRisk, cur, hideCapital)}</div>
+              <div style={{ fontSize: 11, color: C.textM, fontFamily: F_MONO }}>{actualRiskPct.toFixed(3)}% of total</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── INPUTS ── */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 18, marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <Label>Position Size Calculator</Label>
+          <div style={{ fontSize: 10, color: C.textD }}>Risk on {dAmt(totalCapInr, "₹", hideCapital)} total</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: grid2, gap: 12 }}>
           <div><Label style={{ marginBottom: 6 }}>Platform</Label><Select value={c.platform} onChange={e => onPlatformChange(e.target.value)} options={[{ value: "AB", label: "Aditya Birla (₹)" }, { value: "Exness", label: "Exness ($)" }]} /></div>
           <div><Label style={{ marginBottom: 6 }}>Market</Label><Select value={c.market} onChange={e => onMarketChange(e.target.value)} options={c.platform === "AB" ? MARKETS_INR : MARKETS_USD} /></div>
           <div><Label style={{ marginBottom: 6 }}>Direction</Label><Select value={c.direction} onChange={e => setC({ ...c, direction: e.target.value })} options={["Long", "Short"]} /></div>
           <div>
             <Label style={{ marginBottom: 6 }}>Risk %</Label>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", gap: 3 }}>
               {[0.25, 0.5, 1, 1.5, 2, 2.5].map(r => (
                 <button key={r} onClick={() => setC({ ...c, riskPct: r })} style={{ flex: 1, padding: "9px 0", background: c.riskPct === r ? C.accent : C.surface2, color: c.riskPct === r ? C.bg : C.textM, border: `1px solid ${c.riskPct === r ? C.accent : C.border}`, borderRadius: 4, fontSize: 10, fontFamily: F_MONO, cursor: "pointer", fontWeight: 600 }}>{r}%</button>
               ))}
             </div>
           </div>
-          <div><Label style={{ marginBottom: 6 }}>Entry Price</Label><Input type="number" value={c.entry} onChange={e => setC({ ...c, entry: e.target.value })} /></div>
-          <div><Label style={{ marginBottom: 6 }}>Stop Loss</Label><Input type="number" value={c.sl} onChange={e => setC({ ...c, sl: e.target.value })} /></div>
+          <div><Label style={{ marginBottom: 6 }}>Entry Price</Label><Input type="number" value={c.entry} onChange={e => setC({ ...c, entry: e.target.value })} placeholder="0.00" /></div>
+          <div><Label style={{ marginBottom: 6 }}>Stop Loss</Label><Input type="number" value={c.sl} onChange={e => setC({ ...c, sl: e.target.value })} placeholder="0.00" /></div>
+
+          {/* MODE TOGGLE + MANUAL LOTS */}
+          <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <Label>Lots</Label>
+              <div style={{ display: "flex", gap: 0, border: `1px solid ${C.border}`, borderRadius: 5, overflow: "hidden" }}>
+                <button onClick={() => setMode("auto")} style={{ padding: "5px 14px", background: mode === "auto" ? C.accent : C.surface2, color: mode === "auto" ? C.bg : C.textM, border: "none", fontSize: 11, fontFamily: F_UI, cursor: "pointer", fontWeight: mode === "auto" ? 600 : 400 }}>Auto calculate</button>
+                <button onClick={() => setMode("manual")} style={{ padding: "5px 14px", background: mode === "manual" ? C.accent : C.surface2, color: mode === "manual" ? C.bg : C.textM, border: "none", fontSize: 11, fontFamily: F_UI, cursor: "pointer", fontWeight: mode === "manual" ? 600 : 400 }}>Enter manually</button>
+              </div>
+            </div>
+            {mode === "manual" ? (
+              <div>
+                <Input type="number" value={c.manualLots} onChange={e => setC({ ...c, manualLots: e.target.value })} placeholder={`e.g. 4 lots`} />
+                <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Enter your lot count — see the resulting risk below</div>
+              </div>
+            ) : (
+              <div style={{ background: C.surface2, borderRadius: 5, padding: "10px 12px", fontSize: 12, color: C.textM }}>
+                Auto-calculated from your risk% and stop distance.
+                {qty > 0 ? <span style={{ color: C.accent, fontWeight: 600, marginLeft: 6 }}>{needsWholeLot ? qty : qty.toFixed(2)} lots</span> : <span style={{ color: C.textD, marginLeft: 6 }}>Fill entry + SL to calculate</span>}
+              </div>
+            )}
+          </div>
+
+          {/* MARGIN PER LOT */}
           {c.platform === "AB" && needsWholeLot && (
-            <div>
+            <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
               <Label style={{ marginBottom: 6 }}>Margin per Lot (₹) <span style={{ color: C.textD, fontSize: 9 }}>optional</span></Label>
-              <Input type="number" value={c.marginPerLot || ""} onChange={e => setC({ ...c, marginPerLot: e.target.value })} placeholder="e.g. 8800 — from broker" />
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Actual margin charged per lot. Shows real capital needed, not notional.</div>
+              <Input type="number" value={c.marginPerLot || ""} onChange={e => setC({ ...c, marginPerLot: e.target.value })} placeholder="e.g. 55000 — ask your broker" />
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Real capital blocked per lot. Without this, position value shows notional (misleading for futures).</div>
             </div>
           )}
+
+          {/* CONTRACT MULTIPLIER */}
           {showMultiplier && (
             <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
               <Label style={{ marginBottom: 6 }}>Contract Multiplier {multLocked && <span style={{ color: C.textD, fontSize: 9, marginLeft: 6 }}>auto-set</span>}</Label>
-              <Input type="number" value={c.multiplier} onChange={e => setC({ ...c, multiplier: +e.target.value || 1 })} placeholder="1" style={{ opacity: multLocked ? 0.7 : 1 }} />
+              <Input type="number" value={c.multiplier} onChange={e => setC({ ...c, multiplier: +e.target.value || 1 })} style={{ opacity: multLocked ? 0.7 : 1 }} />
               <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>
-                {c.market === "MCX Gold Mini" && "100g lot · price quoted per 10g"}
-                {c.market === "MCX Silver Mini" && "5kg lot · price quoted per 1kg"}
-                {c.market === "MCX Crude Oil" && "100 barrels lot · price per barrel"}
-                {c.market === "MCX Natural Gas" && "1250 mmBtu lot · price per mmBtu"}
-                {c.market === "MCX Copper" && "2500kg lot · price per kg"}
-                {c.market === "MCX Aluminium" && "5000kg lot · price per kg"}
+                {c.market === "MCX Gold Mini" && "100g lot · price per 10g"}
+                {c.market === "MCX Silver Mini" && "5kg lot · price per 1kg"}
+                {c.market === "MCX Crude Oil" && "100 barrels · price per barrel"}
+                {c.market === "MCX Natural Gas" && "1250 mmBtu · price per mmBtu"}
+                {c.market === "MCX Copper" && "2500kg · price per kg"}
+                {c.market === "MCX Aluminium" && "5000kg · price per kg"}
                 {c.market === "Nifty 50" && "Lot size 65 (SEBI Jan 2026)"}
                 {c.market === "BankNifty" && "Lot size 30 (SEBI Jan 2026)"}
-                {c.market === "Stock Futures" && "Enter the stock's lot size manually"}
-                {c.market === "Indian Equity" && "Number of shares (1:1)"}
+                {c.market === "Stock Futures" && "Enter stock lot size manually"}
+                {c.market === "Indian Equity" && "Shares — no multiplier needed"}
               </div>
             </div>
           )}
+
+          {/* TARGET R:R */}
           <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
             <Label style={{ marginBottom: 6 }}>Target R:R</Label>
-            <div style={{ display: "flex", gap: 4 }}>
+            <div style={{ display: "flex", gap: 3 }}>
               {[3, 4, 5, 7, 10, 15].map(r => (
                 <button key={r} onClick={() => setC({ ...c, rr: r })} style={{ flex: 1, padding: "9px 0", background: c.rr === r ? C.accent : C.surface2, color: c.rr === r ? C.bg : C.textM, border: `1px solid ${c.rr === r ? C.accent : C.border}`, borderRadius: 4, fontSize: 11, fontFamily: F_MONO, cursor: "pointer", fontWeight: 600 }}>1:{r}</button>
               ))}
             </div>
           </div>
         </div>
-      </Card>
-
-      <div style={{ display: "grid", gridTemplateColumns: grid3, gap: 12, marginTop: 16 }}>
-        <Stat label="Target Risk" value={dAmt(riskAmt, cur, hideCapital)} sub={`${c.riskPct}% of total`} color={C.textM} />
-        <Stat label="Quantity" value={qty > 0 ? (needsWholeLot ? qty.toString() : qty.toFixed(2)) : "—"} sub={needsWholeLot && rawQty > 0 ? `Calc ${rawQty.toFixed(2)} → ${qty} lots` : "Units / lots"} color={C.text} />
-        <Stat label="Actual Risk" value={qty > 0 ? dAmt(actualRisk, cur, hideCapital) : "—"} sub={qty > 0 && totalCapInr > 0 ? `${((actualRisk * (c.platform === "AB" ? 1 : settings.fxRate)) / totalCapInr * 100).toFixed(2)}% of total` : ""} color={C.red} />
-        <Stat
-          label={marginPerLot > 0 ? "Capital Required" : "Position Value (Notional)"}
-          value={posVal > 0 ? dAmt(posVal, cur, hideCapital) : "—"}
-          sub={marginPerLot > 0 ? `${effectiveLeverage}× leverage · Notional ${dAmt(notionalVal, cur, hideCapital)}` : `${effectiveLeverage}× leverage (notional)`}
-          color={marginPerLot > 0 ? C.amber : C.text}
-        />
-        <Stat label="Breakeven (1R)" value={be > 0 ? be.toFixed(2) : "—"} sub="Move stop here" color={C.green} />
-        <Stat label="Final Target" value={target > 0 ? target.toFixed(2) : "—"} sub={`Profit ${qty > 0 ? dAmt(actualRisk * c.rr, cur, hideCapital) : "—"}`} color={C.accent} />
       </div>
 
-      <Btn variant="primary" onClick={saveAsPending} size="lg" style={{ marginTop: 20, width: "100%" }} disabled={qty <= 0}>{qty <= 0 && diff > 0 ? "Stop too small for 1 lot" : "Save as Pending Trade"}</Btn>
+      {/* ── RESULT CARDS ── */}
+      {qty > 0 && diff > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Risk row */}
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 10 }}>
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, padding: 14 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Risk Budget</div>
+              <div style={{ fontSize: 18, fontFamily: F_MONO, fontWeight: 600, color: C.textM }}>{dAmt(riskAmt, cur, hideCapital)}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{c.riskPct}% of total cap</div>
+            </div>
+            <div style={{ background: C.surface, border: `1px solid ${actualRiskPct > 2 ? C.red : C.border}`, borderRadius: 7, padding: 14 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Actual Risk</div>
+              <div style={{ fontSize: 18, fontFamily: F_MONO, fontWeight: 600, color: actualRiskPct > 2 ? C.red : actualRiskPct > 1 ? C.amber : C.green }}>{dAmt(actualRisk, cur, hideCapital)}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{actualRiskPct.toFixed(3)}%</div>
+            </div>
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, padding: 14 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{marginPerLot > 0 ? "Capital Required" : "Notional Value"}</div>
+              <div style={{ fontSize: 18, fontFamily: F_MONO, fontWeight: 600, color: marginPerLot > 0 ? C.amber : C.textM }}>{dAmt(posVal, cur, hideCapital)}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{marginPerLot > 0 ? `${effectiveLeverage}× leverage` : "enter margin/lot for real"}</div>
+            </div>
+          </div>
+
+          {/* Price levels row */}
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, padding: 14 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Entry</div>
+              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.text }}>{c.entry || "—"}</div>
+            </div>
+            <div style={{ background: C.surface, border: `1px solid ${C.green}30`, borderRadius: 7, padding: 14 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>1R Level</div>
+              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.green }}>{oneRLevel > 0 ? oneRLevel.toFixed(2) : "—"}</div>
+              <div style={{ fontSize: 9, color: C.textD, marginTop: 3 }}>Move SL to entry here</div>
+            </div>
+            <div style={{ background: C.surface, border: `1px solid ${C.amber}30`, borderRadius: 7, padding: 14 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Partial Exit (60%)</div>
+              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.amber }}>{partialTarget > 0 ? partialTarget.toFixed(2) : "—"}</div>
+              <div style={{ fontSize: 9, color: C.textD, marginTop: 3 }}>Profit: {dAmt(actualRisk * c.rr * 0.6, cur, hideCapital)}</div>
+            </div>
+            <div style={{ background: C.surface, border: `1px solid ${C.accent}30`, borderRadius: 7, padding: 14 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Final Target</div>
+              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.accent }}>{target > 0 ? target.toFixed(2) : "—"}</div>
+              <div style={{ fontSize: 9, color: C.textD, marginTop: 3 }}>Profit: {dAmt(actualRisk * c.rr, cur, hideCapital)}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Btn variant="primary" onClick={saveAsPending} size="lg" style={{ marginTop: 16, width: "100%" }} disabled={qty <= 0}>
+        {qty <= 0 && diff > 0 ? "Stop too small for 1 lot" : qty <= 0 ? "Fill entry + SL first" : `Save ${needsWholeLot ? qty : qty.toFixed(2)} lots as Pending Trade`}
+      </Btn>
     </div>
   );
 }
