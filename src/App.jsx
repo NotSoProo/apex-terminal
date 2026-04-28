@@ -6,7 +6,35 @@ const C = { bg: "#0a0a0a", surface: "#111111", surface2: "#161616", surface3: "#
 const F_UI = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const F_MONO = "'JetBrains Mono', 'SF Mono', Menlo, monospace";
 
-const DEFAULT_SETTINGS = { inrCapital: 80000, usdCapital: 250, fxRate: 83, pledgeMargin: 0, holdings: [], weekHWM: 0, monthHWM: 0 };
+const DEFAULT_SETTINGS = {
+  // Capital architecture
+  totalCapital: 12000000,    // ₹1.2Cr total
+  inrCapital: 8500000,       // AB ₹85L
+  usdCapital: 35000,         // Exness $35,000
+  fxRate: 100,               // 1 USD = ₹100
+  // AB sub-buckets (₹)
+  abStocks: 6500000,         // ₹65L
+  abTrading: 1200000,        // ₹12L
+  abDryPowder: 800000,       // ₹8L
+  // Stocks sub-buckets (₹)
+  stocksPledged: 4500000,    // ₹45L
+  stocksUnpledged: 2000000,  // ₹20L
+  // Current deployed (manual)
+  pledgeMargin: 0,
+  tradingDeployed: 0,
+  dryPowderUsed: 0,
+  // Risk limits
+  dailyDDLimit: 3,
+  weeklyDDLimit: 6,
+  monthlyDDLimit: 10,
+  annualDDLimit: 30,
+  // HWM tracking
+  weekHWM: 0, monthHWM: 0,
+  weekHWMDate: null, monthHWMDate: null,
+  // Monthly review shown today flag
+  reviewShownDate: null,
+  holdings: [],
+};
 const MARKETS_INR = ["Indian Equity", "Stock Futures", "Nifty 50", "BankNifty", "MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium"];
 const MARKETS_USD = ["XAU/USD (Gold)", "XAG/USD (Silver)", "Oil (WTI)", "Natural Gas", "Copper", "Aluminium", "BTC/USD", "EUR/USD", "USD/JPY", "GBP/USD"];
 
@@ -60,7 +88,7 @@ const LAWS = [
   "Never average down — close the trade + take the day off",
   "Max 5 trades with active risk · Unlimited at breakeven",
   "Pre-trade checklist before every single trade",
-  "Circuit breakers: 3% daily · 5% weekly · 10% monthly",
+  "Circuit breakers: 3% daily · 6% weekly · 10% monthly",
   "Drawdown 4–7% → cut to 0.5% · 7–10% → 0.25%",
   "HWM: give back 50% of weekly gains (after +5%) = lockdown",
   "Keep 10–15% capital aside as emergency reserve",
@@ -179,32 +207,34 @@ export default function ApexTerminal() {
 
   useEffect(() => {
     (() => {
-      const _t = localStorage.getItem("apex_trades");
+      const _t = localStorage.getItem("nsf_trades");
       if (_t) try { setTrades(JSON.parse(_t)); } catch(e) {}
-      const _s = localStorage.getItem("apex_settings");
+      const _s = localStorage.getItem("nsf_settings");
       if (_s) try { setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(_s) }); } catch(e) {}
-      const _h = localStorage.getItem("apex_hide");
+      const _h = localStorage.getItem("nsf_hide");
       if (_h) try { setHideCapital(JSON.parse(_h)); } catch(e) {}
-      const _r = localStorage.getItem("apex_reviews");
+      const _r = localStorage.getItem("nsf_reviews");
       if (_r) try { setReviews(JSON.parse(_r)); } catch(e) {}
-      const _p = localStorage.getItem("apex_premarket");
+      const _p = localStorage.getItem("nsf_premarket");
       if (_p) { try { const data = JSON.parse(_p); setPreMarket(data); if (!data[today()]) setShowPreMarket(true); } catch(e) { setShowPreMarket(true); } }
       else setShowPreMarket(true);
       const _rev = (() => { try { return _r ? JSON.parse(_r) : {}; } catch(e) { return {}; } })();
       const d = new Date();
       if (d.getDate() === 1) {
         const lm = new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().slice(0, 7);
-        if (!_rev[lm]) setShowReview(true);
+        const _sett = _s ? (() => { try { return JSON.parse(_s); } catch(e) { return {}; } })() : {};
+        const todayStr = new Date().toISOString().split("T")[0];
+        if (!_rev[lm] && _sett.reviewShownDate !== todayStr) setShowReview(true);
       }
       setLoaded(true);
     })();
   }, []);
 
-  const saveTrades = (next) => { setTrades(next); try { localStorage.setItem("apex_trades", JSON.stringify(next)); } catch (e) {} };
-  const saveSettings = (next) => { setSettings(next); try { localStorage.setItem("apex_settings", JSON.stringify(next)); } catch (e) {} };
-  const savePreMarket = (next) => { setPreMarket(next); try { localStorage.setItem("apex_premarket", JSON.stringify(next)); } catch (e) {} };
-  const saveReviews = (next) => { setReviews(next); try { localStorage.setItem("apex_reviews", JSON.stringify(next)); } catch (e) {} };
-  const toggleHide = () => { const n = !hideCapital; setHideCapital(n); try { localStorage.setItem("apex_hide", JSON.stringify(n)); } catch (e) {} };
+  const saveTrades = (next) => { setTrades(next); try { localStorage.setItem("nsf_trades", JSON.stringify(next)); } catch (e) {} };
+  const saveSettings = (next) => { setSettings(next); try { localStorage.setItem("nsf_settings", JSON.stringify(next)); } catch (e) {} };
+  const savePreMarket = (next) => { setPreMarket(next); try { localStorage.setItem("nsf_premarket", JSON.stringify(next)); } catch (e) {} };
+  const saveReviews = (next) => { setReviews(next); try { localStorage.setItem("nsf_reviews", JSON.stringify(next)); } catch (e) {} };
+  const toggleHide = () => { const n = !hideCapital; setHideCapital(n); try { localStorage.setItem("nsf_hide", JSON.stringify(n)); } catch (e) {} };
 
   // ════════════════ METRICS ════════════════
   const metrics = useMemo(() => {
@@ -236,8 +266,8 @@ export default function ApexTerminal() {
     const monthReturnPct = monthDD;
 
     // HWM lockdown: if peak >= threshold AND now <= half of peak
-    const weekLockdownActive = (settings.weekHWM || 0) >= 5 && weekDD <= (settings.weekHWM || 0) / 2;
-    const monthLockdownActive = (settings.monthHWM || 0) >= 10 && monthDD <= (settings.monthHWM || 0) / 2;
+    const wkLimit = settings.weeklyDDLimit || 6; const weekLockdownActive = (settings.weekHWM || 0) >= wkLimit && weekDD <= (settings.weekHWM || 0) / 2;
+    const moLimit = settings.monthlyDDLimit || 10; const monthLockdownActive = (settings.monthHWM || 0) >= moLimit && monthDD <= (settings.monthHWM || 0) / 2;
 
     // open risk — trades at BE have riskAmt=0 from calcMetrics
     const openWithRisk = open.filter(x => !calcMetrics(x).slAtBE);
@@ -248,9 +278,10 @@ export default function ApexTerminal() {
     const inrRiskPct = totalCapInr > 0 ? (openInrRisk / totalCapInr) * 100 : 0;
     const usdRiskPct = totalCapInr > 0 ? (openUsdRisk * settings.fxRate / totalCapInr) * 100 : 0;
 
+    const mLimit = settings.monthlyDDLimit || 10;
     let recommendedRisk = 1;
-    if (monthDD <= -7) recommendedRisk = 0.25;
-    else if (monthDD <= -4) recommendedRisk = 0.5;
+    if (monthDD <= -(mLimit * 0.7)) recommendedRisk = 0.25;
+    else if (monthDD <= -(mLimit * 0.4)) recommendedRisk = 0.5;
 
     // breaches
     const breaches = [];
@@ -258,12 +289,12 @@ export default function ApexTerminal() {
       const m = calcMetrics(x);
       const riskInr = x.platform === "AB" ? m.riskAmt : m.riskAmt * settings.fxRate;
       const pct = totalCapInr > 0 ? (riskInr / totalCapInr) * 100 : 0;
-      if (pct > 2.5) breaches.push({ msg: `${x.market}: risk ${pct.toFixed(1)}% of total > 2.5%` });
+      if (pct > (settings.maxRiskPct || 2.5)) breaches.push({ msg: `${x.market}: risk ${pct.toFixed(1)}% of total > 2.5%` });
     });
     if (todayLosses >= 3) breaches.push({ msg: `${todayLosses} losses today — STOP TRADING` });
-    if (dayDD <= -3) breaches.push({ msg: `Daily circuit hit: ${dayDD.toFixed(1)}%` });
-    if (weekDD <= -5) breaches.push({ msg: `Weekly circuit hit: ${weekDD.toFixed(1)}%` });
-    if (monthDD <= -10) breaches.push({ msg: `Monthly circuit hit: ${monthDD.toFixed(1)}%` });
+    if (dayDD <= -(settings.dailyDDLimit || 3)) breaches.push({ msg: `Daily circuit hit: ${dayDD.toFixed(1)}%` });
+    if (weekDD <= -(settings.weeklyDDLimit || 6)) breaches.push({ msg: `Weekly circuit hit: ${weekDD.toFixed(1)}%` });
+    if (monthDD <= -(settings.monthlyDDLimit || 10)) breaches.push({ msg: `Monthly circuit hit: ${monthDD.toFixed(1)}%` });
     if (weekLockdownActive) breaches.push({ msg: "Weekly HWM lockdown — gave back 50% of +5% gains" });
     if (monthLockdownActive) breaches.push({ msg: "Monthly HWM lockdown — gave back 50% of +10% gains" });
     if (openWithRisk.length >= 5) breaches.push({ msg: "5 trades with active risk — max reached" });
@@ -271,19 +302,27 @@ export default function ApexTerminal() {
     return {
       inrPnl, usdPnl, todayInrPnl, todayUsdPnl, todayLosses,
       openInrRisk, openUsdRisk, inrRiskPct, usdRiskPct, totalRiskPct, totalCapInr,
-      monthInrPnl, monthUsdPnl, dayDD, weekDD, monthDD, monthReturnPct,
+      monthInrPnl, monthUsdPnl, weekInrPnl, weekUsdPnl, dayDD, weekDD, monthDD, monthReturnPct,
       breaches, openCount: open.length, openWithRiskCount: openWithRisk.length,
       closedCount: closed.length, recommendedRisk,
       weekLockdownActive, monthLockdownActive,
     };
   }, [trades, settings]);
 
-  // Update HWM peaks
+  // Update HWM peaks — reset at start of new week/month
   useEffect(() => {
     if (!loaded) return;
     const upd = {};
-    if (metrics.weekDD > (settings.weekHWM || 0)) upd.weekHWM = metrics.weekDD;
-    if (metrics.monthDD > (settings.monthHWM || 0)) upd.monthHWM = metrics.monthDD;
+    const todayStr = today();
+    const wStart = weekStart();
+    const mStart = monthStart();
+    // Reset weekly HWM if new week started
+    if (settings.weekHWMDate && settings.weekHWMDate < wStart) { upd.weekHWM = 0; upd.weekHWMDate = wStart; }
+    // Reset monthly HWM if new month started
+    if (settings.monthHWMDate && settings.monthHWMDate < mStart) { upd.monthHWM = 0; upd.monthHWMDate = mStart; }
+    // Update peaks
+    if (metrics.weekDD > (settings.weekHWM || 0)) { upd.weekHWM = metrics.weekDD; if (!settings.weekHWMDate) upd.weekHWMDate = wStart; }
+    if (metrics.monthDD > (settings.monthHWM || 0)) { upd.monthHWM = metrics.monthDD; if (!settings.monthHWMDate) upd.monthHWMDate = mStart; }
     if (Object.keys(upd).length > 0) saveSettings({ ...settings, ...upd });
   }, [metrics.weekDD, metrics.monthDD, loaded]);
 
@@ -343,8 +382,8 @@ export default function ApexTerminal() {
       {!isMobile && (
         <div style={{ width: 220, background: C.surface, borderRight: `1px solid ${C.border}`, padding: "20px 0", position: "sticky", top: 0, height: "100vh", display: "flex", flexDirection: "column", flexShrink: 0 }}>
           <div style={{ padding: "0 20px 24px", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 4, color: C.text }}>APEX</div>
-            <div style={{ fontSize: 9, letterSpacing: 2.5, color: C.textD, marginTop: 2 }}>TERMINAL · V8</div>
+            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 4, color: C.text }}>NSF</div>
+            <div style={{ fontSize: 9, letterSpacing: 2.5, color: C.textD, marginTop: 2 }}>NotSoFolio Alpha</div>
           </div>
           <div style={{ flex: 1, padding: "16px 0", overflowY: "auto" }}>
             {NAV.map(n => (
@@ -372,7 +411,7 @@ export default function ApexTerminal() {
         <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 50 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 3, color: C.text }}>APEX</div>
+              <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 3, color: C.text }}>NSF</div>
               <div style={{ fontSize: 8, letterSpacing: 2, color: C.textD }}>V5</div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
@@ -544,22 +583,30 @@ function SettingsModal({ settings, saveSettings, setShowSettings, exportData, im
   const importRef = useRef();
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, maxWidth: 420, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, maxWidth: 560, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
         <div style={{ fontSize: 11, letterSpacing: 3, color: C.accent, textTransform: "uppercase", marginBottom: 18 }}>Settings</div>
-        {[
-          ["Aditya Birla Capital (₹)", "inrCapital"],
-          ["Exness Capital ($)", "usdCapital"],
-          ["USD/INR Rate", "fxRate"],
-        ].map(([label, key]) => (
-          <div key={key} style={{ marginBottom: 14 }}>
-            <Label style={{ marginBottom: 6 }}>{label}</Label>
-            <Input type="number" value={s[key]} onChange={e => setS({ ...s, [key]: +e.target.value })} />
+        <div style={{ marginBottom: 14 }}><Label style={{ marginBottom: 6 }}>Total Capital (₹)</Label><Input type="number" value={s.totalCapital || 12000000} onChange={e => setS({ ...s, totalCapital: +e.target.value })} /></div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+          <div><Label style={{ marginBottom: 6 }}>AB Capital (₹)</Label><Input type="number" value={s.inrCapital || 8500000} onChange={e => setS({ ...s, inrCapital: +e.target.value })} /></div>
+          <div><Label style={{ marginBottom: 6 }}>Exness Capital ($)</Label><Input type="number" value={s.usdCapital || 35000} onChange={e => setS({ ...s, usdCapital: +e.target.value })} /></div>
+        </div>
+        <div style={{ marginBottom: 14 }}><Label style={{ marginBottom: 6 }}>USD/INR Rate</Label><Input type="number" value={s.fxRate || 100} onChange={e => setS({ ...s, fxRate: +e.target.value })} /></div>
+        <div style={{ marginBottom: 14 }}><Label style={{ marginBottom: 6 }}>Net Pledge Margin (₹) — after haircut</Label><Input type="number" value={s.pledgeMargin || ""} onChange={e => setS({ ...s, pledgeMargin: +e.target.value })} placeholder="Usable margin amount" />{s.pledgeMargin > 0 && <div style={{ fontSize: 11, color: C.green, fontFamily: F_MONO, marginTop: 6 }}>₹{(+s.pledgeMargin).toLocaleString("en-IN")} usable</div>}</div>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+          <Label style={{ marginBottom: 10 }}>AB Sub-Buckets (₹)</Label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><Label style={{ marginBottom: 5, fontSize: 9 }}>Stocks Target</Label><Input type="number" value={s.abStocks || 6500000} onChange={e => setS({ ...s, abStocks: +e.target.value })} /></div>
+            <div><Label style={{ marginBottom: 5, fontSize: 9 }}>Trading Capital</Label><Input type="number" value={s.abTrading || 1200000} onChange={e => setS({ ...s, abTrading: +e.target.value })} /></div>
+            <div><Label style={{ marginBottom: 5, fontSize: 9 }}>Dry Powder</Label><Input type="number" value={s.abDryPowder || 800000} onChange={e => setS({ ...s, abDryPowder: +e.target.value })} /></div>
+            <div><Label style={{ marginBottom: 5, fontSize: 9 }}>Dry Powder Used</Label><Input type="number" value={s.dryPowderUsed || 0} onChange={e => setS({ ...s, dryPowderUsed: +e.target.value })} /></div>
           </div>
-        ))}
-        <div style={{ marginBottom: 14 }}>
-          <Label style={{ marginBottom: 6 }}>Net Pledge Margin Available (₹)</Label>
-          <Input type="number" value={s.pledgeMargin || ""} onChange={e => setS({ ...s, pledgeMargin: +e.target.value })} placeholder="After haircut — usable amount" />
-          {s.pledgeMargin > 0 && <div style={{ fontSize: 11, color: C.green, fontFamily: F_MONO, marginTop: 6 }}>₹{(+s.pledgeMargin).toLocaleString("en-IN")} usable</div>}
+        </div>
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+          <Label style={{ marginBottom: 10 }}>Stocks Split (₹)</Label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><Label style={{ marginBottom: 5, fontSize: 9 }}>Pledged Value</Label><Input type="number" value={s.stocksPledged || 4500000} onChange={e => setS({ ...s, stocksPledged: +e.target.value })} /></div>
+            <div><Label style={{ marginBottom: 5, fontSize: 9 }}>Unpledged Value</Label><Input type="number" value={s.stocksUnpledged || 2000000} onChange={e => setS({ ...s, stocksUnpledged: +e.target.value })} /></div>
+          </div>
         </div>
         <div style={{ marginTop: 20, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
           <Label style={{ marginBottom: 12 }}>Data Backup</Label>
@@ -620,7 +667,7 @@ function MonthlyReviewModal({ trades, settings, reviews, saveReviews, setShowRev
         ))}
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <Btn variant="ghost" onClick={() => setShowReview(false)} size="lg" style={{ flex: 1 }}>Later</Btn>
-          <Btn variant="primary" onClick={() => { saveReviews({ ...reviews, [month]: { ...form, completedAt: new Date().toISOString() } }); setShowReview(false); }} size="lg" style={{ flex: 2 }}>Save Review</Btn>
+          <Btn variant="primary" onClick={() => { saveReviews({ ...reviews, [month]: { ...form, completedAt: new Date().toISOString() } }); saveSettings({ ...settings, reviewShownDate: today() }); setShowReview(false); }} size="lg" style={{ flex: 2 }}>Save Review</Btn>
         </div>
       </div>
     </div>
@@ -791,89 +838,276 @@ function Dashboard({ metrics, settings, trades, hideCapital, combined, inrTotal,
     let cum = 0;
     return dates.map(d => { cum += byDate[d]; return { date: d.slice(5), pnl: cum }; });
   }, [trades, settings]);
+
   const inrDep = trades.filter(t => t.status === "Open" && t.platform === "AB").reduce((a, t) => a + calcMetrics(t).posVal, 0);
   const usdDep = trades.filter(t => t.status === "Open" && t.platform === "Exness").reduce((a, t) => a + calcMetrics(t).posVal, 0);
-  const g4 = isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)";
   const g2 = isMobile ? "1fr" : "1fr 1fr";
   const g3 = isMobile ? "1fr" : "1fr 1fr 1fr";
+
+  const totalCap = settings.totalCapital || 12000000;
+  const abTarget = settings.inrCapital || 8500000;
+  const exCapUsd = settings.usdCapital || 35000;
+  const exTarget = exCapUsd * (settings.fxRate || 100);
+  const abStocks = settings.abStocks || 6500000;
+  const abTrading = settings.abTrading || 1200000;
+  const abDryPowder = settings.abDryPowder || 800000;
+  const stocksPledged = settings.stocksPledged || 4500000;
+  const stocksUnpledged = settings.stocksUnpledged || 2000000;
+  const tradingDeployed = inrDep;
+  const pledgeNet = settings.pledgeMargin || 0;
+  const dryPowderUsed = settings.dryPowderUsed || 0;
+  const annualLossLimit = totalCap * (settings.annualDDLimit || 30) / 100;
+  const totalPnlInr = (metrics.inrPnl || 0) + (metrics.usdPnl || 0) * (settings.fxRate || 100);
+  const annualDDUsed = Math.min(0, totalPnlInr);
+  const annualDDPct = totalCap > 0 ? Math.abs(annualDDUsed) / totalCap * 100 : 0;
+  const dDLimit = settings.dailyDDLimit || 3;
+  const wDLimit = settings.weeklyDDLimit || 6;
+  const mDLimit = settings.monthlyDDLimit || 10;
+
+  // deployment % for top cards
+  const combinedDeployed = inrDep + usdDep * (settings.fxRate || 100);
+  const combinedDepPct = combined > 0 ? (combinedDeployed / combined) * 100 : 0;
+  const abDepPct = abTarget > 0 ? (inrDep / abTarget) * 100 : 0;
+  const exDepPct = exTarget > 0 ? (usdDep * (settings.fxRate||100) / exTarget) * 100 : 0;
+
+  const pnlColor = (n) => n > 0 ? C.green : n < 0 ? C.red : C.textM;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {(metrics.dayDD <= -3 || metrics.weekDD <= -5 || metrics.monthDD <= -10 || metrics.weekLockdownActive || metrics.monthLockdownActive) && (
-        <div style={{ background: C.redD + "30", border: `1px solid ${C.red}50`, borderRadius: 6, padding: 14 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+      {/* ── ALERTS ── */}
+      {(metrics.dayDD <= -dDLimit || metrics.weekDD <= -wDLimit || metrics.monthDD <= -mDLimit || metrics.weekLockdownActive || metrics.monthLockdownActive) && (
+        <div style={{ background: C.redD + "30", border: `1px solid ${C.red}50`, borderRadius: 8, padding: 14 }}>
           <div style={{ fontSize: 10, letterSpacing: 2, color: C.red, textTransform: "uppercase", marginBottom: 8, fontWeight: 600 }}>⚠ Circuit / HWM Alert</div>
-          {metrics.dayDD <= -3 && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Daily circuit ({metrics.dayDD.toFixed(1)}%) — stop today</div>}
-          {metrics.weekDD <= -5 && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Weekly circuit ({metrics.weekDD.toFixed(1)}%) — stop this week</div>}
-          {metrics.monthDD <= -10 && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Monthly circuit ({metrics.monthDD.toFixed(1)}%) — full stop</div>}
-          {metrics.weekLockdownActive && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Weekly HWM: gave back 50% of peak gains — lockdown</div>}
-          {metrics.monthLockdownActive && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Monthly HWM: gave back 50% of peak gains — lockdown</div>}
+          {metrics.dayDD <= -dDLimit && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Daily circuit ({metrics.dayDD.toFixed(1)}%) — stop today</div>}
+          {metrics.weekDD <= -wDLimit && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Weekly circuit ({metrics.weekDD.toFixed(1)}%) — stop this week</div>}
+          {metrics.monthDD <= -mDLimit && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Monthly circuit ({metrics.monthDD.toFixed(1)}%) — full stop</div>}
+          {metrics.weekLockdownActive && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Weekly HWM lockdown — no new trades</div>}
+          {metrics.monthLockdownActive && <div style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>Monthly HWM lockdown — no new trades</div>}
         </div>
       )}
       {metrics.recommendedRisk < 1 && (
-        <div style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, borderRadius: 6, padding: 14 }}>
-          <div style={{ fontSize: 10, letterSpacing: 2, color: C.amber, textTransform: "uppercase", marginBottom: 6, fontWeight: 600 }}>Reduce Position Size</div>
-          <div style={{ fontSize: 12, color: C.text }}>Monthly DD {metrics.monthDD.toFixed(1)}% — use <span style={{ color: C.amber, fontWeight: 600 }}>{metrics.recommendedRisk}%</span> risk per trade</div>
+        <div style={{ background: C.amber + "12", border: `1px solid ${C.amber}40`, borderRadius: 8, padding: 12 }}>
+          <span style={{ fontSize: 11, color: C.amber, fontWeight: 600 }}>Size cut active — </span>
+          <span style={{ fontSize: 11, color: C.textM }}>Monthly DD {metrics.monthDD.toFixed(1)}% → use </span>
+          <span style={{ fontSize: 11, color: C.amber, fontWeight: 600 }}>{metrics.recommendedRisk}% risk per trade</span>
         </div>
       )}
-      {metrics.breaches.filter(b => !b.msg.includes("circuit") && !b.msg.includes("HWM")).length > 0 && (
-        <div style={{ background: C.redD + "20", border: `1px solid ${C.red}40`, borderRadius: 6, padding: 14 }}>
-          <div style={{ fontSize: 10, letterSpacing: 2, color: C.red, textTransform: "uppercase", marginBottom: 8, fontWeight: 600 }}>Active Issues</div>
-          {metrics.breaches.filter(b => !b.msg.includes("circuit") && !b.msg.includes("HWM")).map((b, i) => <div key={i} style={{ fontSize: 12, color: C.text, padding: "3px 0" }}>{b.msg}</div>)}
+      {metrics.breaches.filter(b => !b.msg.includes("circuit") && !b.msg.includes("HWM")).map((b, i) => (
+        <div key={i} style={{ background: C.redD + "20", border: `1px solid ${C.red}35`, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: C.text }}>⚠ {b.msg}</div>
+      ))}
+
+      {/* ── PORTFOLIO OVERVIEW — 3 big cards ── */}
+      <div style={{ display: "grid", gridTemplateColumns: g3, gap: 10 }}>
+        {/* Combined */}
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+          <Label style={{ marginBottom: 8 }}>Total Portfolio</Label>
+          <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: C.text, fontFamily: F_MONO, lineHeight: 1.1 }}>{dAmt(combined, "₹", hideCapital)}</div>
+          <div style={{ fontSize: 11, color: pnlColor(totalPnlInr), fontFamily: F_MONO, marginTop: 4 }}>{totalPnlInr >= 0 ? "+" : ""}{dAmt(totalPnlInr, "₹", hideCapital)} all time</div>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+              <span style={{ fontSize: 10, color: C.textD }}>Deployed in trades</span>
+              <span style={{ fontSize: 10, color: C.textM, fontFamily: F_MONO }}>{combinedDepPct.toFixed(1)}%</span>
+            </div>
+            <Bar_ pct={combinedDepPct} color={C.accent} height={5} />
+          </div>
         </div>
-      )}
-      <div style={{ display: "grid", gridTemplateColumns: g4, gap: 12 }}>
-        <Stat label="Combined" value={dAmt(combined, "₹", hideCapital)} sub={`@ ₹${settings.fxRate}/$`} />
-        <Stat label="Aditya Birla" value={dAmt(inrTotal, "₹", hideCapital)} sub={`P&L ${dAmt(metrics.inrPnl, "₹", hideCapital)}`} />
-        <Stat label="Exness" value={dAmt(usdTotal, "$", hideCapital)} sub={`P&L ${dAmt(metrics.usdPnl, "$", hideCapital)}`} />
-        <Stat label="Active Risk" value={`${metrics.openWithRiskCount}/5`} sub={`${metrics.openCount} open total`} color={metrics.openWithRiskCount >= 5 ? C.red : C.text} />
+
+        {/* Aditya Birla */}
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+          <Label style={{ marginBottom: 8 }}>Aditya Birla</Label>
+          <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: C.text, fontFamily: F_MONO, lineHeight: 1.1 }}>{dAmt(inrTotal, "₹", hideCapital)}</div>
+          <div style={{ fontSize: 11, color: pnlColor(metrics.inrPnl), fontFamily: F_MONO, marginTop: 4 }}>{metrics.inrPnl >= 0 ? "+" : ""}{dAmt(metrics.inrPnl, "₹", hideCapital)} P&L</div>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+              <span style={{ fontSize: 10, color: C.textD }}>Deployed</span>
+              <span style={{ fontSize: 10, color: C.textM, fontFamily: F_MONO }}>{abDepPct.toFixed(1)}% · {dAmt(inrDep, "₹", hideCapital)}</span>
+            </div>
+            <Bar_ pct={abDepPct} color={C.green} height={5} />
+          </div>
+        </div>
+
+        {/* Exness */}
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+          <Label style={{ marginBottom: 8 }}>Exness</Label>
+          <div style={{ fontSize: isMobile ? 22 : 26, fontWeight: 700, color: C.text, fontFamily: F_MONO, lineHeight: 1.1 }}>{dAmt(usdTotal, "$", hideCapital)}</div>
+          <div style={{ fontSize: 11, color: pnlColor(metrics.usdPnl), fontFamily: F_MONO, marginTop: 4 }}>{metrics.usdPnl >= 0 ? "+" : ""}{dAmt(metrics.usdPnl, "$", hideCapital)} P&L</div>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+              <span style={{ fontSize: 10, color: C.textD }}>Deployed</span>
+              <span style={{ fontSize: 10, color: C.textM, fontFamily: F_MONO }}>{exDepPct.toFixed(1)}% · {dAmt(usdDep, "$", hideCapital)}</span>
+            </div>
+            <Bar_ pct={exDepPct} color={C.green} height={5} />
+          </div>
+        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: g3, gap: 12 }}>
-        {[["Daily · -3%", metrics.dayDD, 3], ["Weekly · -5%", metrics.weekDD, 5], ["Monthly · -10%", metrics.monthDD, 10]].map(([label, dd, lim]) => (
-          <Card key={label}><Label>{label}</Label><div style={{ fontSize: 20, color: dd <= -lim ? C.red : dd <= -lim * 0.66 ? C.amber : C.text, fontFamily: F_MONO, fontWeight: 600, marginTop: 8 }}>{dd >= 0 ? "+" : ""}{dd.toFixed(2)}%</div><div style={{ marginTop: 10 }}><Bar_ pct={Math.min(100, Math.abs(dd) / lim * 100)} color={dd <= -lim ? C.red : dd <= -lim * 0.66 ? C.amber : C.green} /></div></Card>
-        ))}
+
+      {/* ── CIRCUIT GAUGES — inline compact row ── */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+        <Label style={{ marginBottom: 12 }}>Drawdown Gauges</Label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {[[`Daily`, metrics.dayDD, dDLimit], [`Weekly`, metrics.weekDD, wDLimit], [`Monthly`, metrics.monthDD, mDLimit]].map(([label, dd, lim]) => {
+            const pct = Math.min(100, Math.abs(dd) / lim * 100);
+            const color = dd <= -lim ? C.red : dd <= -lim * 0.66 ? C.amber : C.green;
+            return (
+              <div key={label}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: 11, color: C.textM }}>{label} <span style={{ color: C.textD, fontSize: 10 }}>limit -{lim}%</span></span>
+                  <span style={{ fontSize: 12, color, fontFamily: F_MONO, fontWeight: 600 }}>{dd >= 0 ? "+" : ""}{dd.toFixed(2)}% <span style={{ fontSize: 10, color: C.textD }}>({pct.toFixed(0)}% used)</span></span>
+                </div>
+                <Bar_ pct={pct} color={color} height={6} />
+              </div>
+            );
+          })}
+        </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: g2, gap: 12 }}>
-        <Card>
-          <Label>Risk Thermometer · % of Total</Label>
-          <div style={{ marginTop: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>Combined</span><span style={{ fontSize: 14, color: metrics.totalRiskPct > 5 ? C.red : metrics.totalRiskPct > 3 ? C.amber : C.text, fontFamily: F_MONO, fontWeight: 600 }}>{metrics.totalRiskPct.toFixed(2)}%</span></div>
-            <Bar_ pct={metrics.totalRiskPct * 10} color={metrics.totalRiskPct > 5 ? C.red : metrics.totalRiskPct > 3 ? C.amber : C.green} height={8} />
+
+      {/* ── CAPITAL ARCHITECTURE ── */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+        <Label style={{ marginBottom: 16 }}>Capital Architecture</Label>
+
+        {/* AB Section */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Aditya Birla</span>
+            <span style={{ fontSize: 13, color: C.textM, fontFamily: F_MONO }}>{dAmt(abTarget, "₹", hideCapital)}</span>
           </div>
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ fontSize: 11, color: C.textM }}>AB</span><span style={{ fontSize: 11, color: C.textM, fontFamily: F_MONO }}>{metrics.inrRiskPct.toFixed(2)}% · {dAmt(metrics.openInrRisk, "₹", hideCapital)}</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, color: C.textM }}>Exness</span><span style={{ fontSize: 11, color: C.textM, fontFamily: F_MONO }}>{metrics.usdRiskPct.toFixed(2)}% · {dAmt(metrics.openUsdRisk, "$", hideCapital)}</span></div>
+
+          {/* Stacked breakdown bar */}
+          <div style={{ height: 8, borderRadius: 4, overflow: "hidden", display: "flex", marginBottom: 8 }}>
+            <div style={{ width: `${(abStocks/abTarget)*100}%`, background: C.accent, opacity: 0.9 }} />
+            <div style={{ width: `${(abTrading/abTarget)*100}%`, background: C.green, opacity: 0.9 }} />
+            <div style={{ width: `${(abDryPowder/abTarget)*100}%`, background: C.amber, opacity: 0.9 }} />
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: C.textD }}>BE trades excluded · only active risk counted</div>
-        </Card>
-        <Card>
-          <Label>Capital Deployed</Label>
-          <div style={{ marginTop: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 12, color: C.textM }}>Aditya Birla</span><span style={{ fontSize: 12, color: C.text, fontFamily: F_MONO }}>{dAmt(inrDep, "₹", hideCapital)} / {dAmt(settings.inrCapital, "₹", hideCapital)}</span></div>
-            <Bar_ pct={settings.inrCapital > 0 ? (inrDep / settings.inrCapital) * 100 : 0} />
+
+          {/* Legend */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+            {[{label:"Stocks", val: abStocks, color: C.accent},{label:"Trading", val: abTrading, color: C.green},{label:"Dry Powder", val: abDryPowder, color: C.amber}].map(b => (
+              <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <div style={{ width: 8, height: 8, borderRadius: 2, background: b.color }} />
+                <span style={{ fontSize: 10, color: C.textM }}>{b.label}</span>
+                <span style={{ fontSize: 10, color: b.color, fontFamily: F_MONO }}>{dAmt(b.val, "₹", hideCapital)}</span>
+              </div>
+            ))}
           </div>
-          <div style={{ marginTop: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontSize: 12, color: C.textM }}>Exness</span><span style={{ fontSize: 12, color: C.text, fontFamily: F_MONO }}>{dAmt(usdDep, "$", hideCapital)} / {dAmt(settings.usdCapital, "$", hideCapital)}</span></div>
-            <Bar_ pct={settings.usdCapital > 0 ? (usdDep / settings.usdCapital) * 100 : 0} />
+
+          {/* Individual bucket rows */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {[
+              { label: "Stocks", target: abStocks, deployed: pledgeNet > 0 ? pledgeNet : 0, free: abStocks - Math.min(abStocks, pledgeNet), color: C.accent, sub: `Pledged ₹${(stocksPledged/100000).toFixed(0)}L · Unpledged ₹${(stocksUnpledged/100000).toFixed(0)}L` },
+              { label: "Trading Capital", target: abTrading, deployed: tradingDeployed, free: Math.max(0, abTrading - tradingDeployed), color: C.green, sub: "Active futures / options" },
+              { label: "Dry Powder", target: abDryPowder, deployed: dryPowderUsed, free: Math.max(0, abDryPowder - dryPowderUsed), color: C.amber, sub: "For new opportunities" },
+            ].map(b => (
+              <div key={b.label} style={{ background: C.surface2, borderRadius: 6, padding: "10px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div>
+                    <span style={{ fontSize: 12, color: C.text, fontWeight: 500 }}>{b.label}</span>
+                    <div style={{ fontSize: 10, color: C.textD, marginTop: 1 }}>{b.sub}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 13, color: b.color, fontFamily: F_MONO, fontWeight: 600 }}>{dAmt(b.target, "₹", hideCapital)}</div>
+                    <div style={{ fontSize: 9, color: C.textD, fontFamily: F_MONO }}>{dAmt(b.free, "₹", hideCapital)} free</div>
+                  </div>
+                </div>
+                <Bar_ pct={b.target > 0 ? (b.deployed / b.target) * 100 : 0} color={b.color} height={4} />
+              </div>
+            ))}
           </div>
-          {settings.pledgeMargin > 0 && <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 12, color: C.textM }}>Pledge Margin (net)</span><span style={{ fontSize: 12, color: C.green, fontFamily: F_MONO }}>{dAmt(settings.pledgeMargin, "₹", hideCapital)}</span></div>}
-        </Card>
+
+          {/* Stocks pledge detail */}
+          <div style={{ marginTop: 8, padding: "10px 12px", background: C.dim, borderRadius: 6, borderLeft: `3px solid ${C.accent}` }}>
+            <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1, marginBottom: 8 }}>STOCKS DETAIL</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              <div><div style={{ fontSize: 9, color: C.textD }}>PLEDGED</div><div style={{ fontSize: 13, color: C.amber, fontFamily: F_MONO, fontWeight: 600, marginTop: 2 }}>{dAmt(stocksPledged, "₹", hideCapital)}</div></div>
+              <div><div style={{ fontSize: 9, color: C.textD }}>NET MARGIN</div><div style={{ fontSize: 13, color: C.green, fontFamily: F_MONO, fontWeight: 600, marginTop: 2 }}>{dAmt(pledgeNet, "₹", hideCapital)}</div></div>
+              <div><div style={{ fontSize: 9, color: C.textD }}>UNPLEDGED</div><div style={{ fontSize: 13, color: C.text, fontFamily: F_MONO, fontWeight: 600, marginTop: 2 }}>{dAmt(stocksUnpledged, "₹", hideCapital)}</div></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: 1, background: C.border, marginBottom: 20 }} />
+
+        {/* Exness Section */}
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Exness</span>
+            <span style={{ fontSize: 13, color: C.textM, fontFamily: F_MONO }}>{dAmt(exCapUsd, "$", hideCapital)} = {dAmt(exTarget, "₹", hideCapital)}</span>
+          </div>
+          <div style={{ background: C.surface2, borderRadius: 6, padding: "10px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div>
+                <span style={{ fontSize: 12, color: C.text, fontWeight: 500 }}>Open Positions</span>
+                <div style={{ fontSize: 10, color: C.textD, marginTop: 1 }}>Forex, metals, commodities</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 13, color: C.green, fontFamily: F_MONO, fontWeight: 600 }}>{dAmt(usdDep, "$", hideCapital)}</div>
+                <div style={{ fontSize: 9, color: C.textD, fontFamily: F_MONO }}>{dAmt(Math.max(0, exCapUsd - usdDep), "$", hideCapital)} free</div>
+              </div>
+            </div>
+            <Bar_ pct={exCapUsd > 0 ? (usdDep / exCapUsd) * 100 : 0} color={C.green} height={4} />
+          </div>
+        </div>
       </div>
-      <Card>
-        <Label>Equity Curve · Last 30 Days</Label>
-        <div style={{ marginTop: 14, height: 180 }}>
+
+      {/* ── RISK + ANNUAL DD ── */}
+      <div style={{ display: "grid", gridTemplateColumns: g2, gap: 10 }}>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+          <Label style={{ marginBottom: 12 }}>Risk Exposure</Label>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>Combined</span>
+            <span style={{ fontSize: 16, color: metrics.totalRiskPct > 5 ? C.red : metrics.totalRiskPct > 3 ? C.amber : C.green, fontFamily: F_MONO, fontWeight: 700 }}>{metrics.totalRiskPct.toFixed(2)}%</span>
+          </div>
+          <Bar_ pct={metrics.totalRiskPct * 10} color={metrics.totalRiskPct > 5 ? C.red : metrics.totalRiskPct > 3 ? C.amber : C.green} height={7} />
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, color: C.textD }}>AB · {metrics.inrRiskPct.toFixed(2)}%</span><span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>{dAmt(metrics.openInrRisk, "₹", hideCapital)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, color: C.textD }}>Exness · {metrics.usdRiskPct.toFixed(2)}%</span><span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>{dAmt(metrics.openUsdRisk, "$", hideCapital)}</span></div>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 10, color: C.textD }}>Active risk / 5 trades · BE excluded</div>
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ fontSize: 13, color: metrics.openWithRiskCount >= 5 ? C.red : C.text, fontFamily: F_MONO, fontWeight: 700 }}>{metrics.openWithRiskCount}/5</div>
+            <span style={{ fontSize: 11, color: C.textD }}>trades with active risk</span>
+          </div>
+        </div>
+
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+          <Label style={{ marginBottom: 12 }}>Annual Drawdown · {settings.annualDDLimit || 30}% limit</Label>
+          <div style={{ fontSize: 22, color: annualDDPct > 20 ? C.red : annualDDPct > 15 ? C.amber : C.text, fontFamily: F_MONO, fontWeight: 700 }}>{dAmt(Math.abs(annualDDUsed), "₹", hideCapital)}</div>
+          <div style={{ fontSize: 11, color: C.textM, marginTop: 4 }}>{annualDDPct.toFixed(2)}% of {dAmt(annualLossLimit, "₹", hideCapital)} used</div>
+          <div style={{ marginTop: 10 }}><Bar_ pct={annualDDPct / (settings.annualDDLimit || 30) * 100} color={annualDDPct > 20 ? C.red : annualDDPct > 15 ? C.amber : C.green} height={7} /></div>
+          <div style={{ marginTop: 8, fontSize: 11, color: annualDDUsed < 0 ? C.textM : C.green }}>{annualDDUsed < 0 ? `${dAmt(Math.max(0, annualLossLimit - Math.abs(annualDDUsed)), "₹", hideCapital)} remaining this year` : "No losses recorded this year"}</div>
+        </div>
+      </div>
+
+      {/* ── EQUITY CURVE ── */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+        <Label style={{ marginBottom: 14 }}>Equity Curve · Last 30 Days</Label>
+        <div style={{ height: 180 }}>
           {curve.length > 1 ? (
             <ResponsiveContainer><LineChart data={curve} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}><CartesianGrid stroke={C.border} strokeDasharray="2 2" vertical={false} /><XAxis dataKey="date" tick={{ fill: C.textD, fontSize: 10, fontFamily: F_MONO }} stroke={C.border} /><YAxis tick={{ fill: C.textD, fontSize: 10, fontFamily: F_MONO }} stroke={C.border} tickFormatter={v => hideCapital ? "•" : fmt(v)} /><Tooltip contentStyle={{ background: C.surface2, border: `1px solid ${C.border}`, fontSize: 11, fontFamily: F_MONO }} formatter={v => [dAmt(v, "₹", hideCapital), "Cum P&L"]} /><Line type="monotone" dataKey="pnl" stroke={C.accent} strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer>
           ) : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontSize: 12, color: C.textD }}>No closed trades yet</div>}
         </div>
-      </Card>
-      <Card>
-        <Label>This Month</Label>
-        <div style={{ display: "grid", gridTemplateColumns: g4, gap: isMobile ? 14 : 24, marginTop: 14 }}>
-          <div><div style={{ fontSize: 11, color: C.textM }}>Return</div><div style={{ fontSize: 16, color: metrics.monthReturnPct >= 6 ? C.green : metrics.monthReturnPct >= 0 ? C.text : C.red, fontFamily: F_MONO, fontWeight: 600, marginTop: 4 }}>{hideCapital ? "•••" : `${metrics.monthReturnPct >= 0 ? "+" : ""}${metrics.monthReturnPct.toFixed(2)}%`}</div><div style={{ fontSize: 10, color: C.textD, marginTop: 2 }}>Target: 6–10%</div></div>
-          <div><div style={{ fontSize: 11, color: C.textM }}>₹ P&L</div><div style={{ fontSize: 16, color: metrics.monthInrPnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600, marginTop: 4 }}>{dAmt(metrics.monthInrPnl, "₹", hideCapital)}</div></div>
-          <div><div style={{ fontSize: 11, color: C.textM }}>$ P&L</div><div style={{ fontSize: 16, color: metrics.monthUsdPnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600, marginTop: 4 }}>{dAmt(metrics.monthUsdPnl, "$", hideCapital)}</div></div>
-          <div><div style={{ fontSize: 11, color: C.textM }}>Losses Today</div><div style={{ fontSize: 16, color: metrics.todayLosses >= 3 ? C.red : metrics.todayLosses >= 2 ? C.amber : C.text, fontFamily: F_MONO, fontWeight: 600, marginTop: 4 }}>{metrics.todayLosses}</div><div style={{ fontSize: 10, color: C.textD, marginTop: 2 }}>3 = stop</div></div>
+      </div>
+
+      {/* ── PERFORMANCE SUMMARY ── */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+        <Label style={{ marginBottom: 14 }}>Performance</Label>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 14 }}>
+          {[
+            { label: "Monthly Return", value: hideCapital ? "•••" : `${metrics.monthReturnPct >= 0 ? "+" : ""}${metrics.monthReturnPct.toFixed(2)}%`, sub: "Target 6–10%", color: metrics.monthReturnPct >= 6 ? C.green : metrics.monthReturnPct >= 0 ? C.text : C.red },
+            { label: "Weekly P&L", value: dAmt((metrics.weekInrPnl||0)+(metrics.weekUsdPnl||0)*(settings.fxRate||100),"₹",hideCapital), sub: "This week", color: (metrics.weekInrPnl||0)+(metrics.weekUsdPnl||0)*(settings.fxRate||100) >= 0 ? C.green : C.red },
+            { label: "Month ₹ P&L", value: dAmt(metrics.monthInrPnl,"₹",hideCapital), sub: "AB platform", color: metrics.monthInrPnl >= 0 ? C.green : C.red },
+            { label: "Losses Today", value: String(metrics.todayLosses), sub: "3 = stop trading", color: metrics.todayLosses >= 3 ? C.red : metrics.todayLosses >= 2 ? C.amber : C.text },
+          ].map(s => (
+            <div key={s.label}>
+              <div style={{ fontSize: 10, color: C.textD, marginBottom: 6, letterSpacing: 1, textTransform: "uppercase" }}>{s.label}</div>
+              <div style={{ fontSize: 20, color: s.color, fontFamily: F_MONO, fontWeight: 700 }}>{s.value}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{s.sub}</div>
+            </div>
+          ))}
         </div>
-      </Card>
+      </div>
+
     </div>
   );
 }
@@ -909,7 +1143,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
           return (
             <Card key={t.id} padding={14}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                <div><div style={{ fontSize: 14, fontWeight: 600 }}>{t.market}{t.parentId && <span style={{ color: C.amber, fontSize: 9, marginLeft: 6 }}>↗</span>}</div><div style={{ fontSize: 10, color: C.textD, fontFamily: F_MONO, marginTop: 2 }}>{t.platform === "AB" ? "AB" : "Exness"} · {t.date.slice(5)} · <span style={{ color: t.direction === "Long" ? C.green : C.red }}>{t.direction}</span></div></div>
+                <div><div style={{ fontSize: 14, fontWeight: 600 }}>{t.market}{t.parentId && <span style={{ color: C.amber, fontSize: 9, marginLeft: 6 }}>↗</span>}</div><div style={{ fontSize: 10, color: C.textD, fontFamily: F_MONO, marginTop: 2 }}>{t.platform === "AB" ? "AB" : "Exness"} · {t.date.slice(5)}{t.status === "Open" ? ` · ${timeSince(t.date)} open` : ""} · <span style={{ color: t.direction === "Long" ? C.green : C.red }}>{t.direction}</span></div></div>
                 <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 3, background: sColor + "20", color: sColor, letterSpacing: 1, textTransform: "uppercase", fontWeight: 600, flexShrink: 0 }}>{t.status}</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
@@ -925,10 +1159,13 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
                     {m.liveR !== null && <div style={{ fontSize: 10, color: m.liveR >= 0 ? C.green : C.red, fontFamily: F_MONO, marginTop: 3 }}>{m.liveR >= 0 ? "+" : ""}{m.liveR}R live</div>}
                   </div>
                   <div>
-                    <div style={{ fontSize: 9, color: C.textD, marginBottom: 4, letterSpacing: 1 }}>CURRENT SL</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>CURRENT SL</div>
+                      {!m.slAtBE && m.bePrice > 0 && <button onClick={() => updateSL(t.id, m.bePrice.toFixed(2))} style={{ fontSize: 9, padding: "2px 6px", background: C.amber + "20", border: `1px solid ${C.amber}40`, color: C.amber, borderRadius: 3, cursor: "pointer", fontFamily: F_UI, fontWeight: 600 }}>→ BE</button>}
+                    </div>
                     <input type="number" value={t.currentSL || ""} onChange={e => updateSL(t.id, e.target.value)} placeholder="Move to BE?" style={{ background: C.surface2, border: `1px solid ${m.slAtBE ? C.green : C.border}`, color: C.text, borderRadius: 4, padding: "7px 10px", fontSize: 12, fontFamily: F_MONO, width: "100%", boxSizing: "border-box", outline: "none" }} />
                     {m.slAtBE && <div style={{ fontSize: 10, color: C.green, marginTop: 3 }}>✓ At breakeven — no risk</div>}
-                    {!m.slAtBE && m.bePrice && t.cmp && t.direction === "Long" && +t.cmp >= m.bePrice && <div style={{ fontSize: 10, color: C.amber, marginTop: 3 }}>Move SL to {m.bePrice.toFixed(2)}</div>}
+                    {!m.slAtBE && m.bePrice > 0 && +t.cmp >= m.bePrice && t.direction === "Long" && <div style={{ fontSize: 10, color: C.amber, marginTop: 3 }}>Price past BE — tap → BE</div>}
                   </div>
                 </div>
               )}
@@ -1230,8 +1467,13 @@ function Journal({ trades, saveTrades, hideCapital, isMobile }) {
             const isClosed = t.status === "Closed";
             const isLoss = isClosed && (m.pnl || 0) < 0;
             const checklistDone = Object.values(t.checklist || {}).filter(Boolean).length;
+            const isLongTrade = t.direction === "Long";
             const achievedR = isClosed && t.exitPrice && t.entry && t.stopLoss
-              ? (Math.abs(+t.exitPrice - +t.entry) / Math.abs(+t.entry - +t.stopLoss)) * (m.pnl >= 0 ? 1 : -1) : null;
+              ? (() => {
+                  const diff = isLongTrade ? +t.exitPrice - +t.entry : +t.entry - +t.exitPrice;
+                  const stopDist = Math.abs(+t.entry - +t.stopLoss);
+                  return stopDist > 0 ? +(diff / stopDist).toFixed(2) : 0;
+                })() : null;
             return (
               <Card key={t.id} padding={0}>
                 <div onClick={() => setExpanded(isOpen ? null : t.id)} style={{ padding: "14px 18px", cursor: "pointer" }}>
@@ -1445,6 +1687,13 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
   const wholeLotMarkets = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty", "Stock Futures"];
   const needsWholeLot = wholeLotMarkets.includes(c.market);
   const roundLot = (n) => (n - Math.floor(n)) >= 0.75 ? Math.ceil(n) : Math.floor(n);
+const timeSince = (dateStr) => {
+  if (!dateStr) return "";
+  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000 / 60);
+  if (diff < 60) return `${diff}m`;
+  if (diff < 1440) return `${Math.floor(diff/60)}h`;
+  return `${Math.floor(diff/1440)}d`;
+};
   const qty = needsWholeLot ? roundLot(rawQty) : rawQty;
   // actual risk for the whole-lot quantity (will be ≤ riskAmt)
   const actualRisk = qty * mult * diff;
