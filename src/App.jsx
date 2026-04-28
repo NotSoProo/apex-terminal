@@ -161,6 +161,8 @@ const Btn = ({ onClick, children, variant = "default", size = "md", style = {}, 
     default: { background: C.surface2, color: C.text, border: `1px solid ${C.border}` },
     primary: { background: C.accent, color: C.bg, fontWeight: 600, border: "none" },
     ghost: { background: "transparent", color: C.textM, border: `1px solid ${C.border}` },
+    danger: { background: C.red + "20", color: C.red, border: `1px solid ${C.red}40` },
+    success: { background: C.green + "20", color: C.green, border: `1px solid ${C.green}40` },
   };
   return <button onClick={disabled ? undefined : onClick} style={{ borderRadius: 5, cursor: disabled ? "not-allowed" : "pointer", fontFamily: F_UI, fontWeight: 500, opacity: disabled ? 0.4 : 1, transition: "all 0.15s", ...sizes[size], ...variants[variant], ...style }}>{children}</button>;
 };
@@ -1661,7 +1663,7 @@ function Rules({ metrics }) {
 }
 
 function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobile, recommendedRisk }) {
-  const [c, setC] = useState({ platform: "AB", entry: "", sl: "", riskPct: recommendedRisk, rr: 3, market: "MCX Gold Mini", direction: "Long", multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"] });
+  const [c, setC] = useState({ platform: "AB", entry: "", sl: "", riskPct: recommendedRisk, rr: 3, market: "MCX Gold Mini", direction: "Long", multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"], marginPerLot: "" });
 
   const onMarketChange = (newMarket) => {
     const newMult = CONTRACT_MULTIPLIERS[newMarket] !== undefined ? CONTRACT_MULTIPLIERS[newMarket] : 1;
@@ -1697,7 +1699,11 @@ const timeSince = (dateStr) => {
   const qty = needsWholeLot ? roundLot(rawQty) : rawQty;
   // actual risk for the whole-lot quantity (will be ≤ riskAmt)
   const actualRisk = qty * mult * diff;
-  const posVal = qty * mult * (+c.entry || 0);
+  // posVal: if user enters margin per lot, use that (actual capital needed) instead of full notional
+  const marginPerLot = +c.marginPerLot || 0;
+  const posVal = marginPerLot > 0 ? qty * marginPerLot : qty * mult * (+c.entry || 0);
+  const notionalVal = qty * mult * (+c.entry || 0); // always calculated for leverage
+  const effectiveLeverage = (marginPerLot > 0 && qty > 0) ? (notionalVal / (qty * marginPerLot)).toFixed(1) : (actualRisk > 0 ? (notionalVal / actualRisk).toFixed(1) : 0);
   const target = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff * c.rr : +c.entry - diff * c.rr) : 0;
   const be = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff : +c.entry - diff) : 0;
   const partial = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff * c.rr * 0.6 : +c.entry - diff * c.rr * 0.6) : 0;
@@ -1747,6 +1753,13 @@ const timeSince = (dateStr) => {
           </div>
           <div><Label style={{ marginBottom: 6 }}>Entry Price</Label><Input type="number" value={c.entry} onChange={e => setC({ ...c, entry: e.target.value })} /></div>
           <div><Label style={{ marginBottom: 6 }}>Stop Loss</Label><Input type="number" value={c.sl} onChange={e => setC({ ...c, sl: e.target.value })} /></div>
+          {c.platform === "AB" && needsWholeLot && (
+            <div>
+              <Label style={{ marginBottom: 6 }}>Margin per Lot (₹) <span style={{ color: C.textD, fontSize: 9 }}>optional</span></Label>
+              <Input type="number" value={c.marginPerLot || ""} onChange={e => setC({ ...c, marginPerLot: e.target.value })} placeholder="e.g. 8800 — from broker" />
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Actual margin charged per lot. Shows real capital needed, not notional.</div>
+            </div>
+          )}
           {showMultiplier && (
             <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
               <Label style={{ marginBottom: 6 }}>Contract Multiplier {multLocked && <span style={{ color: C.textD, fontSize: 9, marginLeft: 6 }}>auto-set</span>}</Label>
@@ -1780,7 +1793,12 @@ const timeSince = (dateStr) => {
         <Stat label="Target Risk" value={dAmt(riskAmt, cur, hideCapital)} sub={`${c.riskPct}% of total`} color={C.textM} />
         <Stat label="Quantity" value={qty > 0 ? (needsWholeLot ? qty.toString() : qty.toFixed(2)) : "—"} sub={needsWholeLot && rawQty > 0 ? `Calc ${rawQty.toFixed(2)} → ${qty} lots` : "Units / lots"} color={C.text} />
         <Stat label="Actual Risk" value={qty > 0 ? dAmt(actualRisk, cur, hideCapital) : "—"} sub={qty > 0 && totalCapInr > 0 ? `${((actualRisk * (c.platform === "AB" ? 1 : settings.fxRate)) / totalCapInr * 100).toFixed(2)}% of total` : ""} color={C.red} />
-        <Stat label="Position Value" value={posVal > 0 ? dAmt(posVal, cur, hideCapital) : "—"} sub={`${actualRisk > 0 ? (posVal / actualRisk).toFixed(1) : 0}× leverage`} />
+        <Stat
+          label={marginPerLot > 0 ? "Capital Required" : "Position Value (Notional)"}
+          value={posVal > 0 ? dAmt(posVal, cur, hideCapital) : "—"}
+          sub={marginPerLot > 0 ? `${effectiveLeverage}× leverage · Notional ${dAmt(notionalVal, cur, hideCapital)}` : `${effectiveLeverage}× leverage (notional)`}
+          color={marginPerLot > 0 ? C.amber : C.text}
+        />
         <Stat label="Breakeven (1R)" value={be > 0 ? be.toFixed(2) : "—"} sub="Move stop here" color={C.green} />
         <Stat label="Final Target" value={target > 0 ? target.toFixed(2) : "—"} sub={`Profit ${qty > 0 ? dAmt(actualRisk * c.rr, cur, hideCapital) : "—"}`} color={C.accent} />
       </div>
