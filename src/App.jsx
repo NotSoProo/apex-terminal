@@ -127,13 +127,14 @@ const monthStart = () => today().slice(0, 7) + "-01";
 const calcMetrics = (t) => {
   const entry = +t.entry, sl = +t.stopLoss, target = +t.target, qty = +t.qty;
   const mult = +t.multiplier || CONTRACT_MULTIPLIERS[t.market] || 1;
-  if (!entry || !sl || !qty) return { rr: 0, riskAmt: 0, posVal: 0, pnl: t.pnl, mult, stopDist: 0, slAtBE: false, livePnl: null, liveR: null, bePrice: 0 };
+  if (!entry || !sl || !qty || Math.abs(entry - sl) < 0.0001) return { rr: 0, riskAmt: 0, posVal: entry * qty * mult, pnl: t.pnl, mult, stopDist: 0, slAtBE: false, livePnl: null, liveR: null, bePrice: entry };
   const isLong = t.direction === "Long";
   const stopDist = Math.abs(entry - sl);
   const targetDist = target ? Math.abs(target - entry) : 0;
   const rr = stopDist > 0 ? +(targetDist / stopDist).toFixed(2) : 0;
-  const bePrice = isLong ? entry + stopDist : entry - stopDist;
-  const slAtBE = t.currentSL ? (isLong ? +t.currentSL >= bePrice - 0.01 : +t.currentSL <= bePrice + 0.01) : false;
+  const bePrice = entry; // true breakeven = entry price (moving SL here = no loss)
+  const oneRLevel = isLong ? entry + stopDist : entry - stopDist; // price where you SHOULD move SL to BE
+  const slAtBE = t.currentSL ? (isLong ? +t.currentSL >= entry - 0.01 : +t.currentSL <= entry + 0.01) : false;
   const riskAmt = slAtBE ? 0 : stopDist * qty * mult;
   const posVal = entry * qty * mult;
   let pnl = t.pnl;
@@ -170,6 +171,13 @@ const Btn = ({ onClick, children, variant = "default", size = "md", style = {}, 
 const Input = ({ value, onChange, placeholder, type = "text", style = {} }) => <input type={type} value={value ?? ""} onChange={onChange} placeholder={placeholder} style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: "10px 12px", fontSize: 13, fontFamily: F_MONO, outline: "none", width: "100%", boxSizing: "border-box", ...style }} />;
 const Select = ({ value, onChange, options, style = {} }) => <select value={value} onChange={onChange} style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: "10px 12px", fontSize: 13, fontFamily: F_UI, outline: "none", width: "100%", boxSizing: "border-box", cursor: "pointer", ...style }}>{options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}</select>;
 const Dot = ({ ok }) => <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: ok ? C.green : C.red, marginRight: 8, boxShadow: `0 0 6px ${ok ? C.green : C.red}80` }} />;
+const timeSince = (dateStr) => {
+  if (!dateStr) return "";
+  const mins = Math.floor((Date.now() - new Date(dateStr + "T00:00:00")) / 1000 / 60);
+  if (mins < 60) return `${mins}m`;
+  if (mins < 1440) return `${Math.floor(mins/60)}h`;
+  return `${Math.floor(mins/1440)}d`;
+};
 const Bar_ = ({ pct, color = C.accent, height = 6 }) => <div style={{ width: "100%", height, background: C.dim, borderRadius: height, overflow: "hidden" }}><div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: "100%", background: color, transition: "width 0.4s" }} /></div>;
 
 const Eye = ({ open, size = 14 }) => open
@@ -268,8 +276,9 @@ export default function ApexTerminal() {
     const monthReturnPct = monthDD;
 
     // HWM lockdown: if peak >= threshold AND now <= half of peak
-    const wkLimit = settings.weeklyDDLimit || 6; const weekLockdownActive = (settings.weekHWM || 0) >= wkLimit && weekDD <= (settings.weekHWM || 0) / 2;
-    const moLimit = settings.monthlyDDLimit || 10; const monthLockdownActive = (settings.monthHWM || 0) >= moLimit && monthDD <= (settings.monthHWM || 0) / 2;
+    // HWM: trigger lockdown if peak gain >= 5% weekly or 10% monthly, then drops to 50% of peak
+    const weekLockdownActive = (settings.weekHWM || 0) >= 5 && weekDD <= (settings.weekHWM || 0) / 2;
+    const monthLockdownActive = (settings.monthHWM || 0) >= 10 && monthDD <= (settings.monthHWM || 0) / 2;
 
     // open risk — trades at BE have riskAmt=0 from calcMetrics
     const openWithRisk = open.filter(x => !calcMetrics(x).slAtBE);
@@ -334,8 +343,8 @@ export default function ApexTerminal() {
     { id: "dashboard", label: "Dashboard" },
     { id: "positions", label: "Positions" },
     { id: "holdings", label: "Holdings" },
-    { id: "addtrade", label: "Add Trade" },
     { id: "returns", label: "Returns" },
+    { id: "addtrade", label: "Add Trade" },
     { id: "calculator", label: "Calculator" },
     { id: "journal", label: "Journal" },
     { id: "rules", label: "Rules" },
@@ -349,13 +358,13 @@ export default function ApexTerminal() {
     const data = { trades, settings, reviews, preMarket, exportedAt: new Date().toISOString(), version: 8 };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `apex-backup-${today()}.json`; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = `nsf-backup-${today()}.json`; a.click();
     URL.revokeObjectURL(url);
   };
   const importData = (e) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = async (ev) => {
+    reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
         if (data.trades) saveTrades(data.trades);
@@ -414,7 +423,7 @@ export default function ApexTerminal() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px" }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 3, color: C.text }}>NSF</div>
-              <div style={{ fontSize: 8, letterSpacing: 2, color: C.textD }}>V5</div>
+              <div style={{ fontSize: 8, letterSpacing: 2, color: C.textD }}>ALPHA</div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={toggleHide} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.textM, padding: "6px 10px", borderRadius: 5, cursor: "pointer", display: "flex", alignItems: "center" }}><Eye open={!hideCapital} size={12} /></button>
@@ -422,9 +431,9 @@ export default function ApexTerminal() {
               <button onClick={() => setShowSettings(true)} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.textM, padding: "6px 10px", borderRadius: 5, cursor: "pointer", fontSize: 11, fontFamily: F_UI }}>⚙</button>
             </div>
           </div>
-          <div style={{ display: "flex", overflowX: "auto", borderTop: `1px solid ${C.border}`, scrollbarWidth: "none" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", borderTop: `1px solid ${C.border}` }}>
             {NAV.map(n => (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ flexShrink: 0, padding: "11px 14px", background: page === n.id ? C.surface2 : "transparent", border: "none", borderBottom: page === n.id ? `2px solid ${C.accent}` : "2px solid transparent", color: page === n.id ? C.text : C.textM, fontSize: 12, fontFamily: F_UI, cursor: "pointer", whiteSpace: "nowrap" }}>{n.label}</button>
+              <button key={n.id} onClick={() => setPage(n.id)} style={{ flexShrink: 0, padding: "11px 14px", background: page === n.id ? C.surface2 : "transparent", border: "none", borderBottom: page === n.id ? `2px solid ${C.accent}` : "2px solid transparent", color: page === n.id ? C.text : C.textM, fontSize: 12, fontFamily: F_UI, cursor: "pointer", width: "25%", textAlign: "center", boxSizing: "border-box" }}>{n.label}</button>
             ))}
           </div>
         </div>
@@ -841,8 +850,17 @@ function Dashboard({ metrics, settings, trades, hideCapital, combined, inrTotal,
     return dates.map(d => { cum += byDate[d]; return { date: d.slice(5), pnl: cum }; });
   }, [trades, settings]);
 
-  const inrDep = trades.filter(t => t.status === "Open" && t.platform === "AB").reduce((a, t) => a + calcMetrics(t).posVal, 0);
-  const usdDep = trades.filter(t => t.status === "Open" && t.platform === "Exness").reduce((a, t) => a + calcMetrics(t).posVal, 0);
+  // Deployment = marginPerLot × lots if entered (real capital), else riskAmt (avoid showing notional)
+  const inrDep = trades.filter(t => t.status === "Open" && t.platform === "AB").reduce((a, t) => {
+    const m = calcMetrics(t);
+    const margin = +t.marginPerLot || 0;
+    return a + (margin > 0 ? +t.qty * margin : m.riskAmt);
+  }, 0);
+  const usdDep = trades.filter(t => t.status === "Open" && t.platform === "Exness").reduce((a, t) => {
+    const m = calcMetrics(t);
+    const margin = +t.marginPerLot || 0;
+    return a + (margin > 0 ? +t.qty * margin : m.riskAmt);
+  }, 0);
   const g2 = isMobile ? "1fr" : "1fr 1fr";
   const g3 = isMobile ? "1fr" : "1fr 1fr 1fr";
 
@@ -859,7 +877,12 @@ function Dashboard({ metrics, settings, trades, hideCapital, combined, inrTotal,
   const pledgeNet = settings.pledgeMargin || 0;
   const dryPowderUsed = settings.dryPowderUsed || 0;
   const annualLossLimit = totalCap * (settings.annualDDLimit || 30) / 100;
-  const totalPnlInr = (metrics.inrPnl || 0) + (metrics.usdPnl || 0) * (settings.fxRate || 100);
+  // Annual DD — current year only
+  const currentYear = new Date().getFullYear().toString();
+  const yearTrades = trades.filter(t => t.status === "Closed" && (t.exitDate || "").startsWith(currentYear));
+  const yearInrPnl = yearTrades.filter(t => t.platform === "AB").reduce((a, t) => a + (calcMetrics(t).pnl || 0), 0);
+  const yearUsdPnl = yearTrades.filter(t => t.platform === "Exness").reduce((a, t) => a + (calcMetrics(t).pnl || 0), 0);
+  const totalPnlInr = yearInrPnl + yearUsdPnl * (settings.fxRate || 100);
   const annualDDUsed = Math.min(0, totalPnlInr);
   const annualDDPct = totalCap > 0 ? Math.abs(annualDDUsed) / totalCap * 100 : 0;
   const dDLimit = settings.dailyDDLimit || 3;
@@ -1163,11 +1186,11 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                       <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>CURRENT SL</div>
-                      {!m.slAtBE && m.bePrice > 0 && <button onClick={() => updateSL(t.id, m.bePrice.toFixed(2))} style={{ fontSize: 9, padding: "2px 6px", background: C.amber + "20", border: `1px solid ${C.amber}40`, color: C.amber, borderRadius: 3, cursor: "pointer", fontFamily: F_UI, fontWeight: 600 }}>→ BE</button>}
+                      {!m.slAtBE && m.bePrice > 0 && <button onClick={() => updateSL(t.id, m.bePrice.toFixed(2))} style={{ fontSize: 9, padding: "2px 6px", background: C.amber + "20", border: `1px solid ${C.amber}40`, color: C.amber, borderRadius: 3, cursor: "pointer", fontFamily: F_UI, fontWeight: 600 }}>→ BE ({m.bePrice?.toFixed(2)})</button>}
                     </div>
                     <input type="number" value={t.currentSL || ""} onChange={e => updateSL(t.id, e.target.value)} placeholder="Move to BE?" style={{ background: C.surface2, border: `1px solid ${m.slAtBE ? C.green : C.border}`, color: C.text, borderRadius: 4, padding: "7px 10px", fontSize: 12, fontFamily: F_MONO, width: "100%", boxSizing: "border-box", outline: "none" }} />
-                    {m.slAtBE && <div style={{ fontSize: 10, color: C.green, marginTop: 3 }}>✓ At breakeven — no risk</div>}
-                    {!m.slAtBE && m.bePrice > 0 && +t.cmp >= m.bePrice && t.direction === "Long" && <div style={{ fontSize: 10, color: C.amber, marginTop: 3 }}>Price past BE — tap → BE</div>}
+                    {m.slAtBE && <div style={{ fontSize: 10, color: C.green, marginTop: 3 }}>✓ SL at entry — no loss possible</div>}
+                    {!m.slAtBE && m.oneRLevel > 0 && +t.cmp >= m.oneRLevel && t.direction === "Long" && <div style={{ fontSize: 10, color: C.amber, marginTop: 3 }}>At 1R — move SL to entry ({m.bePrice?.toFixed(2)})</div>}
                   </div>
                 </div>
               )}
@@ -1244,7 +1267,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
 }
 
 function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile, recommendedRisk }) {
-  const [t, setT] = useState({ date: today(), market: "MCX Gold Mini", platform: "AB", direction: "Long", entry: "", stopLoss: "", target: "", qty: "", conviction: 7, status: "Pending", setupTag: SETUP_TAGS[0], multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"] });
+  const [t, setT] = useState({ date: today(), market: "MCX Gold Mini", platform: "AB", direction: "Long", entry: "", stopLoss: "", target: "", qty: "", marginPerLot: "", conviction: 7, status: "Pending", setupTag: SETUP_TAGS[0], multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"] });
   const [preTrade, setPreTrade] = useState(PRE_TRADE_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}));
 
   const onMarketChange = (m) => setT({ ...t, market: m, multiplier: CONTRACT_MULTIPLIERS[m] !== undefined ? CONTRACT_MULTIPLIERS[m] : 1 });
@@ -1255,7 +1278,7 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
   const totalCap = settings.inrCapital + settings.usdCapital * settings.fxRate;
   const riskInr = t.platform === "AB" ? m.riskAmt : m.riskAmt * settings.fxRate;
   const actualRiskPct = totalCap > 0 ? (riskInr / totalCap) * 100 : 0;
-  const warnRR = m.rr > 0 && m.rr < 3;
+  const warnRR = m.rr > 0 && m.rr < 2.99;
   const warnRisk = actualRiskPct > 2.5;
   const checklistCount = Object.values(preTrade).filter(Boolean).length;
   const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(t.market);
@@ -1280,7 +1303,16 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
           <div><Label style={{ marginBottom: 6 }}>Entry Price</Label><Input type="number" value={t.entry} onChange={e => setT({ ...t, entry: e.target.value })} placeholder="0.00" /></div>
           <div><Label style={{ marginBottom: 6 }}>Stop Loss</Label><Input type="number" value={t.stopLoss} onChange={e => setT({ ...t, stopLoss: e.target.value })} placeholder="0.00" /></div>
           <div><Label style={{ marginBottom: 6 }}>Target</Label><Input type="number" value={t.target} onChange={e => setT({ ...t, target: e.target.value })} placeholder="0.00" /></div>
-          <div><Label style={{ marginBottom: 6 }}>Quantity / Lots</Label><Input type="number" value={t.qty} onChange={e => setT({ ...t, qty: e.target.value })} placeholder="0" /></div>
+          <div>
+            <Label style={{ marginBottom: 6 }}>Number of Lots</Label>
+            <Input type="number" value={t.qty} onChange={e => setT({ ...t, qty: e.target.value })} placeholder="e.g. 4" />
+            <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>How many lots you bought/sold</div>
+          </div>
+          <div>
+            <Label style={{ marginBottom: 6 }}>Margin per Lot (₹) <span style={{ color: C.textD, fontSize: 9 }}>optional</span></Label>
+            <Input type="number" value={t.marginPerLot || ""} onChange={e => setT({ ...t, marginPerLot: e.target.value })} placeholder="e.g. 55000" />
+            <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Real capital blocked per lot by broker</div>
+          </div>
           {t.platform === "AB" && (
             <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
               <Label style={{ marginBottom: 6 }}>Contract Multiplier {multLocked && <span style={{ color: C.textD, fontSize: 9, marginLeft: 6 }}>auto-set</span>}</Label>
@@ -1318,7 +1350,12 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
       <div style={{ display: "grid", gridTemplateColumns: g4, gap: 12, marginTop: 16 }}>
         <Stat label="Risk Amount" value={dAmt(m.riskAmt, cur, hideCapital)} sub={`${actualRiskPct.toFixed(2)}% of total`} color={warnRisk ? C.red : C.text} />
         <Stat label="R:R Ratio" value={m.rr ? `1:${m.rr}` : "—"} sub={warnRR ? "Below 1:3" : m.rr >= 3 ? "✓ Min met" : ""} color={warnRR ? C.red : m.rr >= 3 ? C.green : C.text} />
-        <Stat label="Position Value" value={dAmt(m.posVal, cur, hideCapital)} sub="Total exposure" />
+        <Stat
+          label={+t.marginPerLot > 0 ? "Capital Required" : "Position Value (Notional)"}
+          value={+t.marginPerLot > 0 ? dAmt(+t.qty * +t.marginPerLot, cur, hideCapital) : dAmt(m.posVal, cur, hideCapital)}
+          sub={+t.marginPerLot > 0 ? `${+t.qty} lots × ${dAmt(+t.marginPerLot, cur, false)}` : "Notional — enter margin/lot for real"}
+          color={+t.marginPerLot > 0 ? C.amber : C.text}
+        />
         <Stat label="Stop Distance" value={m.stopDist ? m.stopDist.toFixed(2) : "—"} sub="Per unit" />
       </div>
       {(warnRR || warnRisk) && (
@@ -1689,13 +1726,6 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
   const wholeLotMarkets = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty", "Stock Futures"];
   const needsWholeLot = wholeLotMarkets.includes(c.market);
   const roundLot = (n) => (n - Math.floor(n)) >= 0.75 ? Math.ceil(n) : Math.floor(n);
-const timeSince = (dateStr) => {
-  if (!dateStr) return "";
-  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000 / 60);
-  if (diff < 60) return `${diff}m`;
-  if (diff < 1440) return `${Math.floor(diff/60)}h`;
-  return `${Math.floor(diff/1440)}d`;
-};
   const qty = needsWholeLot ? roundLot(rawQty) : rawQty;
   // actual risk for the whole-lot quantity (will be ≤ riskAmt)
   const actualRisk = qty * mult * diff;
