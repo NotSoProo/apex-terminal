@@ -391,7 +391,7 @@ export default function ApexTerminal() {
   const shared = { metrics, settings, trades, hideCapital, hideMode, combined, inrTotal, usdTotal, isMobile };
 
   return (
-    <div style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: F_UI, display: "flex", flexDirection: isMobile ? "column" : "row" }}>
+    <div style={{ background: C.bg, minHeight: "100vh", maxHeight: "100vh", color: C.text, fontFamily: F_UI, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
       {showPreMarket && <PreMarketModal preMarket={preMarket} savePreMarket={savePreMarket} setShowPreMarket={setShowPreMarket} setShowBrief={setShowBrief} />}
       {showBrief && <DailyBriefModal metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} setShowBrief={setShowBrief} />}
       {showSettings && <SettingsModal settings={settings} saveSettings={saveSettings} setShowSettings={setShowSettings} exportData={exportData} importData={importData} />}
@@ -402,28 +402,84 @@ export default function ApexTerminal() {
 
       {/* SIDEBAR (DESKTOP) */}
       {!isMobile && (
-        <div style={{ width: 220, background: C.surface, borderRight: `1px solid ${C.border}`, padding: "20px 0", position: "sticky", top: 0, height: "100vh", display: "flex", flexDirection: "column", flexShrink: 0 }}>
-          <div style={{ padding: "0 20px 24px", borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: 4, color: C.text }}>NSF</div>
-            <div style={{ fontSize: 9, letterSpacing: 2.5, color: C.textD, marginTop: 2 }}>NotSoFolio Alpha</div>
+        <div style={{ width: 240, background: C.surface, borderRight: `1px solid ${C.border}`, height: "100vh", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden" }}>
+          {/* Logo */}
+          <div style={{ padding: "20px 20px 18px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 3, color: C.text }}>NSF</div>
+                <div style={{ fontSize: 9, letterSpacing: 2, color: C.textD, marginTop: 1 }}>NotSoFolio Alpha</div>
+              </div>
+              <button onClick={toggleHide} title={hideMode === "numbers" ? "Show %" : hideMode === "pct" ? "Hide" : "Show numbers"} style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, padding: "5px 10px", cursor: "pointer", color: hideMode !== "numbers" ? C.accent : C.textM, fontSize: 11, fontFamily: F_MONO, fontWeight: 600 }}>{hideMode === "numbers" ? "₹" : hideMode === "pct" ? "%" : "•••"}</button>
+            </div>
           </div>
-          <div style={{ flex: 1, padding: "16px 0", overflowY: "auto" }}>
+
+          {/* Live stats strip */}
+          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>TOTAL CAPITAL</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: C.text, fontFamily: F_MONO }}>{dAmt(combined, "₹", hideCapital)}</div>
+              <div style={{ fontSize: 10, color: metrics.inrPnl + metrics.usdPnl * settings.fxRate >= 0 ? C.green : C.red, fontFamily: F_MONO, marginTop: 2 }}>
+                {dAmt(metrics.inrPnl + metrics.usdPnl * (settings.fxRate||100), "₹", hideCapital)} all time
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[
+                { label: "Daily", val: metrics.dayDD, limit: settings.dailyDDLimit || 3 },
+                { label: "Monthly", val: metrics.monthDD, limit: settings.monthlyDDLimit || 10 },
+              ].map(({ label, val, limit }) => (
+                <div key={label} style={{ background: C.surface2, borderRadius: 5, padding: "7px 10px" }}>
+                  <div style={{ fontSize: 9, color: C.textD }}>{label}</div>
+                  <div style={{ fontSize: 13, fontFamily: F_MONO, fontWeight: 600, color: val <= -limit ? C.red : val <= -limit*0.6 ? C.amber : C.green, marginTop: 2 }}>
+                    {val >= 0 ? "+" : ""}{val.toFixed(1)}%
+                  </div>
+                </div>
+              ))}
+            </div>
+            {metrics.breaches.length > 0 && (
+              <div style={{ marginTop: 8, padding: "6px 10px", background: C.red + "15", border: `1px solid ${C.red}30`, borderRadius: 4 }}>
+                <div style={{ fontSize: 10, color: C.red, fontWeight: 600 }}>⚠ {metrics.breaches.length} breach{metrics.breaches.length > 1 ? "es" : ""}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Nav */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px 0" }}>
             {NAV.map(n => (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 20px", background: page === n.id ? C.surface2 : "transparent", border: "none", borderLeft: page === n.id ? `2px solid ${C.accent}` : "2px solid transparent", color: page === n.id ? C.text : C.textM, fontSize: 13, fontFamily: F_UI, cursor: "pointer" }}>{n.label}</button>
+              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 20px", background: page === n.id ? C.surface2 : "transparent", border: "none", borderLeft: page === n.id ? `3px solid ${C.accent}` : "3px solid transparent", color: page === n.id ? C.text : C.textM, fontSize: 13, fontFamily: F_UI, cursor: "pointer", fontWeight: page === n.id ? 600 : 400, transition: "all 0.1s" }}>{n.label}</button>
             ))}
           </div>
-          <div style={{ padding: "16px 20px", borderTop: `1px solid ${C.border}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <Label style={{ fontSize: 9 }}>Capital</Label>
-              <button onClick={toggleHide} style={{ background: "transparent", border: "none", color: C.textM, cursor: "pointer", padding: 0, display: "flex" }}><Eye open={!hideCapital} size={13} /></button>
-            </div>
-            <div style={{ fontSize: 17, fontWeight: 600, color: C.text, fontFamily: F_MONO, marginTop: 4 }}>{dAmt(combined, "₹", hideCapital)}</div>
-            <div style={{ fontSize: 10, color: C.textD, fontFamily: F_MONO, marginTop: 2 }}>{hideCapital ? "₹•••• · $••••" : `₹${(inrTotal / 1000).toFixed(1)}K · $${usdTotal.toFixed(0)}`}</div>
 
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
-              <button onClick={() => setShowReview(true)} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.textM, padding: "6px 12px", borderRadius: 4, fontSize: 11, fontFamily: F_UI, cursor: "pointer" }}>Monthly Review</button>
-              <button onClick={() => setShowSettings(true)} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.textM, padding: "6px 12px", borderRadius: 4, fontSize: 11, fontFamily: F_UI, cursor: "pointer" }}>Settings · Export</button>
+          {/* Open trades quick view */}
+          {trades.filter(t => t.status === "Open").length > 0 && (
+            <div style={{ padding: "12px 20px", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 8 }}>OPEN POSITIONS</div>
+              {trades.filter(t => t.status === "Open").slice(0, 4).map(t => {
+                const m = calcMetrics(t);
+                const cur = t.platform === "AB" ? "₹" : "$";
+                return (
+                  <div key={t.id} onClick={() => setPage("positions")} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", cursor: "pointer", borderBottom: `1px solid ${C.border}` }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: C.text, fontWeight: 600 }}>{t.stockName || t.market.replace("MCX ", "")}</div>
+                      <div style={{ fontSize: 9, color: t.direction === "Long" ? C.green : C.red }}>{t.direction} · {t.qty} lots</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      {m.livePnl !== null ? <div style={{ fontSize: 11, color: m.livePnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600 }}>{dAmt(m.livePnl, cur, hideCapital)}</div> : <div style={{ fontSize: 10, color: C.textD }}>—</div>}
+                      <div style={{ fontSize: 9, color: m.slAtBE ? C.green : C.textD }}>{m.slAtBE ? "BE ✓" : `SL ${t.currentSL || t.stopLoss}`}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {trades.filter(t => t.status === "Open").length > 4 && (
+                <div style={{ fontSize: 10, color: C.textD, marginTop: 6, textAlign: "center" }}>+{trades.filter(t => t.status === "Open").length - 4} more</div>
+              )}
             </div>
+          )}
+
+          {/* Bottom buttons */}
+          <div style={{ padding: "12px 20px", borderTop: `1px solid ${C.border}`, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+            <button onClick={() => setShowReview(true)} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.textM, padding: "7px 12px", borderRadius: 5, fontSize: 11, fontFamily: F_UI, cursor: "pointer", textAlign: "left" }}>📋 Monthly Review</button>
+            <button onClick={() => setShowSettings(true)} style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.textM, padding: "7px 12px", borderRadius: 5, fontSize: 11, fontFamily: F_UI, cursor: "pointer", textAlign: "left" }}>⚙ Settings · Export</button>
           </div>
         </div>
       )}
@@ -451,7 +507,7 @@ export default function ApexTerminal() {
       )}
 
       {/* MAIN */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, overflow: "auto", height: isMobile ? "auto" : "100vh" }}>
         <div style={{ padding: isMobile ? "14px 16px" : "20px 28px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: C.bg, gap: 10, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 600, textTransform: "capitalize" }}>{page === "addtrade" ? "Add Trade" : page}</div>
@@ -1680,11 +1736,11 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
       <FilterBar />
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 950 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 820 }}>
             <thead>
               <tr style={{ background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
-                {["Date", "Market", "Dir", "Entry", "SL", "Target", "Lots", "CMP", "R:R", "Risk", "1R Level", "Status", "P&L", ""].map(h => (
-                  <th key={h} style={{ padding: "11px 10px", textAlign: "left", color: C.textM, fontWeight: 500, fontSize: 10, letterSpacing: 1, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
+                {["Date", "Market", "Dir", "Entry", "SL / BE", "Target", "Lots", "CMP", "R:R", "Risk", "P&L", ""].map(h => (
+                  <th key={h} style={{ padding: "10px 8px", textAlign: "left", color: C.textM, fontWeight: 500, fontSize: 10, letterSpacing: 1, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1705,7 +1761,6 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
                     <td style={{ padding: "10px" }}>{t.status === "Open" && <input type="number" value={t.cmp || ""} onChange={e => updateCMP(t.id, e.target.value)} placeholder="—" style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, fontSize: 11, fontFamily: F_MONO, width: 70, padding: "4px 6px", borderRadius: 3, outline: "none" }} />}</td>
                     <td style={{ padding: "10px", fontFamily: F_MONO, color: m.rr >= 3 ? C.green : m.rr > 0 ? C.amber : C.textD }}>{m.rr ? `1:${m.rr}` : "—"}</td>
                     <td style={{ padding: "10px", fontFamily: F_MONO, color: m.slAtBE ? C.green : C.textM }}>{m.slAtBE ? "0 (BE)" : dAmt(m.riskAmt, cur, hideCapital)}</td>
-                    <td style={{ padding: "10px", fontFamily: F_MONO, color: C.green }}>{oneRLevel ? oneRLevel.toFixed(1) : "—"}</td>
                     <td style={{ padding: "10px" }}><span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 10, background: (t.status === "Open" ? C.green : t.status === "Closed" ? C.dim : C.amber) + "25", color: t.status === "Open" ? C.green : t.status === "Closed" ? C.textM : C.amber, fontWeight: 600 }}>{t.status}</span></td>
                     <td style={{ padding: "10px", fontFamily: F_MONO, fontWeight: 600, color: (displayPnl || 0) > 0 ? C.green : (displayPnl || 0) < 0 ? C.red : C.textD }}>{displayPnl !== null && displayPnl !== undefined ? dAmt(displayPnl, cur, hideCapital) : "—"}</td>
                     <td style={{ padding: "10px", whiteSpace: "nowrap" }}>
