@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS = {
 const MARKETS_INR = ["Indian Equity", "Stock Futures", "Nifty 50", "BankNifty", "MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium"];
 const MARKETS_USD = [
   "XAU/USD (Gold)", "XAG/USD (Silver)",
-  "Oil (WTI/USOIL)", "Oil (Brent/UKOIL)", "Natural Gas",
+  "Oil (WTI/USOIL)", "Natural Gas",
   "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD",
   "USD/CHF", "USD/CAD", "GBP/JPY", "EUR/JPY", "EUR/GBP",
   "BTC/USD", "ETH/USD",
@@ -53,7 +53,6 @@ const EXNESS_MULTIPLIERS = {
   "XAU/USD (Gold)": 100,           // 100 oz/lot, $1 move = $100
   "XAG/USD (Silver)": 5000,        // 5000 oz/lot — but price in oz, $0.01 = $50
   "Oil (WTI/USOIL)": 1000,         // 1000 barrels/lot, $1 move = $1000
-  "Oil (Brent/UKOIL)": 1000,
   "Natural Gas": 10000,             // 10,000 mmBtu/lot
   "EUR/USD": 100000,                // forex standard: 100,000 units, $10/pip/lot
   "GBP/USD": 100000,
@@ -1596,7 +1595,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
   const [partialClose, setPartialClose] = useState(null);
   const [addToPosition, setAddToPosition] = useState(null);
   const STOCK_MARKETS = ["Indian Equity", "Stock Futures"];
-  const COMMODITY_MARKETS = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "XAU/USD (Gold)", "XAG/USD (Silver)", "Oil (WTI/USOIL)", "Oil (Brent/UKOIL)", "Natural Gas"];
+  const COMMODITY_MARKETS = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "XAU/USD (Gold)", "XAG/USD (Silver)", "Oil (WTI/USOIL)", "Natural Gas"];
   const NIFTY_MARKETS = ["Nifty 50", "BankNifty"];
   const FOREX_MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD", "USD/CHF", "USD/CAD", "GBP/JPY", "EUR/JPY", "EUR/GBP"];
 
@@ -2118,7 +2117,22 @@ function PyramidModal({ trade, setPyramidTrade, trades, saveTrades }) {
 // ════════════════ JOURNAL ════════════════
 function Journal({ trades, saveTrades, hideCapital, isMobile }) {
   const [expanded, setExpanded] = useState(null);
-  const list = trades.filter(t => t.status !== "Pending").sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const [search, setSearch] = useState("");
+  const [filterSetup, setFilterSetup] = useState("All");
+  const [filterResult, setFilterResult] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const list = trades.filter(t => {
+    if (t.status === "Pending") return false;
+    if (search && !`${t.market} ${t.stockName || ""} ${t.setupTag || ""} ${t.date}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterSetup !== "All" && t.setupTag !== filterSetup) return false;
+    if (filterResult === "Win" && (calcMetrics(t).pnl || 0) <= 0) return false;
+    if (filterResult === "Loss" && (calcMetrics(t).pnl || 0) >= 0) return false;
+    if (dateFrom && t.date < dateFrom) return false;
+    if (dateTo && t.date > dateTo) return false;
+    return true;
+  }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const update = (id, patch) => saveTrades(trades.map(t => t.id === id ? { ...t, ...patch } : t));
 
   const JOURNAL_QUESTIONS = [
@@ -2129,7 +2143,28 @@ function Journal({ trades, saveTrades, hideCapital, isMobile }) {
 
   return (
     <div>
-      {list.length === 0 ? <Card><div style={{ padding: 40, textAlign: "center", color: C.textD, fontSize: 13 }}>No trades to journal yet</div></Card> : (
+      {/* Search + filters */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search market, setup, date..." style={{ width: "100%", background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "9px 14px", fontSize: 13, fontFamily: F_UI, outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={filterSetup} onChange={e => setFilterSetup(e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: "5px 10px", fontSize: 11, fontFamily: F_UI, cursor: "pointer" }}>
+            <option value="All">All Setups</option>
+            {SETUP_TAGS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={filterResult} onChange={e => setFilterResult(e.target.value)} style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: "5px 10px", fontSize: 11, fontFamily: F_UI, cursor: "pointer" }}>
+            <option value="All">All Results</option>
+            <option value="Win">Wins Only</option>
+            <option value="Loss">Losses Only</option>
+          </select>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} placeholder="From" style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: "5px 10px", fontSize: 11, fontFamily: F_MONO }} />
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} placeholder="To" style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 5, padding: "5px 10px", fontSize: 11, fontFamily: F_MONO }} />
+          {(search || filterSetup !== "All" || filterResult !== "All" || dateFrom || dateTo) && (
+            <Btn variant="ghost" size="sm" onClick={() => { setSearch(""); setFilterSetup("All"); setFilterResult("All"); setDateFrom(""); setDateTo(""); }}>Clear</Btn>
+          )}
+          <span style={{ fontSize: 11, color: C.textD }}>{list.length} trade{list.length !== 1 ? "s" : ""}</span>
+        </div>
+      </div>
+      {list.length === 0 ? <Card><div style={{ padding: 40, textAlign: "center", color: C.textD, fontSize: 13 }}>{search || filterSetup !== "All" || filterResult !== "All" || dateFrom || dateTo ? "No trades match your filters" : "No trades to journal yet"}</div></Card> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {list.map(t => {
             const m = calcMetrics(t); const cur = t.platform === "AB" ? "₹" : "$";
@@ -2219,50 +2254,147 @@ function Journal({ trades, saveTrades, hideCapital, isMobile }) {
 
 function Returns({ trades, settings, hideCapital, isMobile }) {
   const [view, setView] = useState("market");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [showReport, setShowReport] = useState(false);
+
   const closed = trades.filter(t => t.status === "Closed");
+
+  // Date filtered trades for report
+  const reportTrades = closed.filter(t => {
+    const d = t.exitDate || t.date;
+    if (fromDate && d < fromDate) return false;
+    if (toDate && d > toDate) return false;
+    return true;
+  });
+
   const data = useMemo(() => {
+    const src = showReport ? reportTrades : closed;
     const groups = {};
-    closed.forEach(t => {
+    src.forEach(t => {
       const m = calcMetrics(t);
       const pnlInr = t.platform === "AB" ? (m.pnl || 0) : (m.pnl || 0) * settings.fxRate;
-      const k = view === "market" ? t.market : view === "platform" ? (t.platform === "AB" ? "Aditya Birla" : "Exness") : (t.exitDate || t.date).slice(0, 7);
-      if (!groups[k]) groups[k] = { name: k, pnl: 0, trades: 0, wins: 0 };
+      const k = view === "market" ? (t.stockName || t.market) : view === "platform" ? (t.platform === "AB" ? "Aditya Birla" : "Exness") : view === "setup" ? (t.setupTag || "Unknown") : (t.exitDate || t.date).slice(0, 7);
+      if (!groups[k]) groups[k] = { name: k, pnl: 0, trades: 0, wins: 0, totalR: 0 };
       groups[k].pnl += pnlInr; groups[k].trades += 1;
       if ((m.pnl || 0) > 0) groups[k].wins += 1;
+      groups[k].totalR += m.rr || 0;
     });
     return Object.values(groups).sort((a, b) => view === "month" ? a.name.localeCompare(b.name) : b.pnl - a.pnl);
-  }, [view, closed, settings]);
+  }, [view, closed, settings, showReport, reportTrades]);
+
+  // Report stats
+  const totalCap = settings.totalCapital || 12000000;
+  const rPnl = reportTrades.reduce((a, t) => { const m = calcMetrics(t); return a + (t.platform === "AB" ? (m.pnl || 0) : (m.pnl || 0) * settings.fxRate); }, 0);
+  const rWins = reportTrades.filter(t => (calcMetrics(t).pnl || 0) > 0).length;
+  const rWinRate = reportTrades.length > 0 ? (rWins / reportTrades.length * 100).toFixed(0) : 0;
+  const rReturnPct = totalCap > 0 ? (rPnl / totalCap * 100).toFixed(2) : "0";
+  const rAvgRR = reportTrades.length > 0 ? (reportTrades.reduce((a, t) => a + (calcMetrics(t).rr || 0), 0) / reportTrades.length).toFixed(1) : "—";
+  const bestTrade = reportTrades.reduce((best, t) => { const p = calcMetrics(t).pnl || 0; return p > (calcMetrics(best || t).pnl || 0) ? t : best; }, null);
+  const worstTrade = reportTrades.reduce((worst, t) => { const p = calcMetrics(t).pnl || 0; return p < (calcMetrics(worst || t).pnl || 0) ? t : worst; }, null);
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
-        {[["market", "By Market"], ["platform", "By Platform"], ["month", "By Month"]].map(([v, l]) => <Btn key={v} variant={view === v ? "primary" : "ghost"} onClick={() => setView(v)} size="md">{l}</Btn>)}
+      {/* View toggles */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {[["market", "By Market"], ["platform", "By Platform"], ["setup", "By Setup"], ["month", "By Month"]].map(([v, l]) => (
+          <Btn key={v} variant={view === v ? "primary" : "ghost"} onClick={() => setView(v)} size="md">{l}</Btn>
+        ))}
       </div>
-      <Card><Label>P&L · Normalized to ₹</Label>
+
+      {/* Date range report */}
+      <div style={{ background: C.surface, border: `1px solid ${showReport ? C.accent + "50" : C.border}`, borderRadius: 8, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: showReport ? 14 : 0 }}>
+          <Label>Date Range Report</Label>
+          {showReport && <Btn variant="ghost" size="sm" onClick={() => { setShowReport(false); setFromDate(""); setToDate(""); }}>Clear</Btn>}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr auto", gap: 10, marginTop: 10 }}>
+          <div><Label style={{ marginBottom: 5 }}>From</Label><Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} /></div>
+          <div><Label style={{ marginBottom: 5 }}>To</Label><Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} /></div>
+          <div style={{ display: "flex", alignItems: "flex-end" }}>
+            <Btn variant="primary" onClick={() => setShowReport(true)} size="md" disabled={!fromDate && !toDate} style={{ width: isMobile ? "100%" : "auto" }}>Generate Report</Btn>
+          </div>
+        </div>
+
+        {showReport && reportTrades.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, color: C.textD, marginBottom: 10 }}>
+              {fromDate || "Start"} → {toDate || "Today"} · {reportTrades.length} trades
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 10, marginBottom: 12 }}>
+              {[
+                { label: "Net P&L", value: dAmt(rPnl, "₹", hideCapital), color: rPnl >= 0 ? C.green : C.red },
+                { label: "Return", value: `${rReturnPct >= 0 ? "+" : ""}${rReturnPct}%`, color: +rReturnPct >= 0 ? C.green : C.red },
+                { label: "Win Rate", value: `${rWinRate}%`, color: +rWinRate >= 50 ? C.green : C.amber },
+                { label: "Avg R:R", value: `1:${rAvgRR}`, color: +rAvgRR >= 3 ? C.green : C.amber },
+              ].map(s => (
+                <div key={s.label} style={{ background: C.surface2, borderRadius: 6, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>{s.label}</div>
+                  <div style={{ fontSize: 18, color: s.color, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
+              {bestTrade && <div style={{ background: C.green + "10", border: `1px solid ${C.green}30`, borderRadius: 6, padding: "10px 12px" }}>
+                <div style={{ fontSize: 9, color: C.textD }}>BEST TRADE</div>
+                <div style={{ fontSize: 13, color: C.text, fontWeight: 600, marginTop: 3 }}>{bestTrade.stockName || bestTrade.market}</div>
+                <div style={{ fontSize: 14, color: C.green, fontFamily: F_MONO, fontWeight: 700 }}>{dAmt(calcMetrics(bestTrade).pnl, bestTrade.platform === "AB" ? "₹" : "$", hideCapital)}</div>
+              </div>}
+              {worstTrade && <div style={{ background: C.red + "10", border: `1px solid ${C.red}30`, borderRadius: 6, padding: "10px 12px" }}>
+                <div style={{ fontSize: 9, color: C.textD }}>WORST TRADE</div>
+                <div style={{ fontSize: 13, color: C.text, fontWeight: 600, marginTop: 3 }}>{worstTrade.stockName || worstTrade.market}</div>
+                <div style={{ fontSize: 14, color: C.red, fontFamily: F_MONO, fontWeight: 700 }}>{dAmt(calcMetrics(worstTrade).pnl, worstTrade.platform === "AB" ? "₹" : "$", hideCapital)}</div>
+              </div>}
+            </div>
+          </div>
+        )}
+        {showReport && reportTrades.length === 0 && (
+          <div style={{ fontSize: 12, color: C.textD, marginTop: 12, textAlign: "center" }}>No closed trades in this date range</div>
+        )}
+      </div>
+
+      {/* Chart */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16, marginBottom: 14 }}>
+        <Label style={{ marginBottom: 14 }}>P&L · Normalized to ₹ {showReport && <span style={{ fontSize: 10, color: C.accent }}>· filtered</span>}</Label>
         {data.length > 0 ? (
-          <div style={{ marginTop: 16, height: 220 }}>
+          <div style={{ height: 220 }}>
             <ResponsiveContainer><BarChart data={data} margin={{ top: 0, right: 10, left: -10, bottom: 0 }}><CartesianGrid stroke={C.border} strokeDasharray="2 2" vertical={false} /><XAxis dataKey="name" tick={{ fill: C.textD, fontSize: 10, fontFamily: F_MONO }} stroke={C.border} /><YAxis tick={{ fill: C.textD, fontSize: 10, fontFamily: F_MONO }} stroke={C.border} tickFormatter={v => hideCapital ? "•" : fmt(v)} /><Tooltip contentStyle={{ background: C.surface2, border: `1px solid ${C.border}`, fontSize: 11, fontFamily: F_MONO }} formatter={v => dAmt(v, "₹", hideCapital)} cursor={{ fill: C.surface3 }} /><Bar dataKey="pnl" radius={[3, 3, 0, 0]}>{data.map((d, i) => <Cell key={i} fill={d.pnl >= 0 ? C.green : C.red} />)}</Bar></BarChart></ResponsiveContainer>
           </div>
         ) : <div style={{ padding: 40, textAlign: "center", color: C.textD, fontSize: 13 }}>No closed trades yet</div>}
-      </Card>
-      <div style={{ marginTop: 16 }}>
+      </div>
+
+      {/* Table */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
         {isMobile ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {data.map(d => (
-              <Card key={d.name} padding={12}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div><div style={{ fontSize: 13, color: C.text }}>{d.name}</div><div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO, marginTop: 2 }}>{d.trades} trades · {((d.wins / d.trades) * 100).toFixed(0)}% win rate</div></div>
-                  <div style={{ fontSize: 16, color: d.pnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600 }}>{dAmt(d.pnl, "₹", hideCapital)}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            {data.map((d, i) => (
+              <div key={d.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: i < data.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                <div>
+                  <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{d.name}</div>
+                  <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO, marginTop: 2 }}>{d.trades} trades · {((d.wins / d.trades) * 100).toFixed(0)}% win · avg 1:{d.trades > 0 ? (d.totalR / d.trades).toFixed(1) : "—"} R:R</div>
                 </div>
-              </Card>
+                <div style={{ fontSize: 16, color: d.pnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 700 }}>{dAmt(d.pnl, "₹", hideCapital)}</div>
+              </div>
             ))}
           </div>
         ) : (
-          <Card padding={0}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead><tr style={{ background: C.surface2, borderBottom: `1px solid ${C.border}` }}>{["Category", "Trades", "Wins", "Win Rate", "P&L (₹)"].map(h => <th key={h} style={{ padding: "11px 14px", textAlign: "left", color: C.textM, fontWeight: 500, letterSpacing: 1, fontSize: 10, textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
-              <tbody>{data.map(d => <tr key={d.name} style={{ borderBottom: `1px solid ${C.border}` }}><td style={{ padding: "11px 14px", color: C.text }}>{d.name}</td><td style={{ padding: "11px 14px", color: C.textM, fontFamily: F_MONO }}>{d.trades}</td><td style={{ padding: "11px 14px", color: C.textM, fontFamily: F_MONO }}>{d.wins}</td><td style={{ padding: "11px 14px", color: C.textM, fontFamily: F_MONO }}>{((d.wins / d.trades) * 100).toFixed(0)}%</td><td style={{ padding: "11px 14px", color: d.pnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600 }}>{dAmt(d.pnl, "₹", hideCapital)}</td></tr>)}</tbody>
-            </table>
-          </Card>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead><tr style={{ background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
+              {["Category", "Trades", "Wins", "Win Rate", "Avg R:R", "P&L (₹)"].map(h => (
+                <th key={h} style={{ padding: "11px 14px", textAlign: "left", color: C.textM, fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: 1 }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>{data.map(d => (
+              <tr key={d.name} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "11px 14px", color: C.text, fontWeight: 600 }}>{d.name}</td>
+                <td style={{ padding: "11px 14px", color: C.textM, fontFamily: F_MONO }}>{d.trades}</td>
+                <td style={{ padding: "11px 14px", color: C.textM, fontFamily: F_MONO }}>{d.wins}</td>
+                <td style={{ padding: "11px 14px", color: C.textM, fontFamily: F_MONO }}>{((d.wins / d.trades) * 100).toFixed(0)}%</td>
+                <td style={{ padding: "11px 14px", color: C.textM, fontFamily: F_MONO }}>1:{d.trades > 0 ? (d.totalR / d.trades).toFixed(1) : "—"}</td>
+                <td style={{ padding: "11px 14px", color: d.pnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 700 }}>{dAmt(d.pnl, "₹", hideCapital)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
         )}
       </div>
     </div>
