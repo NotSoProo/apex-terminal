@@ -52,7 +52,7 @@ const CONTRACT_MULTIPLIERS = {
   "Indian Equity": 1,
   "Stock Futures": 0,         // manual override per stock
 };
-const SETUP_TAGS = ["Liquidity Sweep", "BOS / Continuation", "Mentor Trade", "Other"];
+const SETUP_TAGS = ["Mentor G", "Mentor Y", "Mentor J", "Liquidity Sweep", "Other"];
 const MISTAKE_TAGS = ["Setup didn't play out", "Broke a rule", "Random market noise", "Wrong timeframe", "News event", "FOMO entry", "Late entry", "Stop too wide", "Stop too tight"];
 
 const PRE_TRADE_CHECKLIST = [
@@ -140,7 +140,7 @@ const calcMetrics = (t) => {
   const isLong = t.direction === "Long";
   const stopDist = Math.abs(entry - sl);
   const targetDist = target ? Math.abs(target - entry) : 0;
-  const rr = stopDist > 0 ? +(targetDist / stopDist).toFixed(2) : 0;
+  const rr = stopDist > 0 ? Math.floor(targetDist / stopDist) : 0;
   const bePrice = entry; // true breakeven = entry price (moving SL here = no loss)
   const oneRLevel = isLong ? entry + stopDist : entry - stopDist; // price where you SHOULD move SL to BE
   const slAtBE = t.currentSL ? (isLong ? +t.currentSL >= entry - 0.01 : +t.currentSL <= entry + 0.01) : false;
@@ -822,29 +822,85 @@ function Holdings({ settings, saveSettings, setPage, hideCapital, isMobile }) {
 }
 
 function CloseTradeModal({ trade, setCloseTrade, trades, saveTrades, hideCapital }) {
-  const [exitPrice, setExitPrice] = useState(trade.cmp || "");
+  const [closeType, setCloseType] = useState("");
+  const [customPrice, setCustomPrice] = useState(trade.cmp || "");
   const [exitDate, setExitDate] = useState(today());
-  const m = calcMetrics({ ...trade, exitPrice, status: "Closed" });
   const cur = trade.platform === "AB" ? "₹" : "$";
-  const achievedR = exitPrice && trade.entry && trade.stopLoss
-    ? (Math.abs(+exitPrice - +trade.entry) / Math.abs(+trade.entry - +trade.stopLoss)) * (m.pnl >= 0 ? 1 : -1) : null;
+  const isLong = trade.direction === "Long";
+  const slPrice = trade.currentSL || trade.stopLoss;
+  const targetPrice = trade.target;
+  const finalExit = closeType === "sl" ? slPrice : closeType === "target" ? targetPrice : customPrice;
+  const m = calcMetrics({ ...trade, exitPrice: finalExit, status: "Closed" });
+  const stopDist = Math.abs(+trade.entry - +(trade.stopLoss || 0));
+  const achievedR = finalExit && stopDist > 0
+    ? +(( isLong ? +finalExit - +trade.entry : +trade.entry - +finalExit ) / stopDist).toFixed(1)
+    : null;
+
+  const OPTIONS = [
+    { id: "sl", label: "Hit Stop Loss", price: slPrice, color: C.red, sub: `SL at ${slPrice}` },
+    { id: "target", label: "Hit Target", price: targetPrice, color: C.green, sub: targetPrice ? `Target at ${targetPrice}` : "No target set", disabled: !targetPrice },
+    { id: "custom", label: "Custom Exit", price: customPrice, color: C.accent, sub: "Enter price manually" },
+  ];
+
+  const doClose = () => {
+    if (!finalExit) return;
+    const exitReason = closeType === "sl" ? "Hit stop loss" : closeType === "target" ? "Hit target" : "Custom exit";
+    saveTrades(trades.map(t => t.id === trade.id ? { ...t, status: "Closed", exitPrice: finalExit, exitDate, exitReason } : t));
+    setCloseTrade(null);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, maxWidth: 420, width: "100%" }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, maxWidth: 420, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
         <div style={{ fontSize: 11, letterSpacing: 3, color: C.accent, textTransform: "uppercase", marginBottom: 4 }}>Close Trade</div>
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>{trade.market} · {trade.direction}</div>
-        <div style={{ marginBottom: 14 }}><Label style={{ marginBottom: 6 }}>Exit Price</Label><Input type="number" value={exitPrice} onChange={e => setExitPrice(e.target.value)} placeholder="Enter exit price" /></div>
-        <div style={{ marginBottom: 16 }}><Label style={{ marginBottom: 6 }}>Exit Date</Label><Input type="date" value={exitDate} onChange={e => setExitDate(e.target.value)} /></div>
-        {exitPrice && (
-          <div style={{ background: m.pnl >= 0 ? C.greenD + "20" : C.redD + "20", border: `1px solid ${m.pnl >= 0 ? C.green : C.red}40`, borderRadius: 6, padding: 14, marginBottom: 16 }}>
-            <Label>Realized P&L</Label>
-            <div style={{ fontSize: 26, color: m.pnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600, marginTop: 4 }}>{dAmt(m.pnl, cur, hideCapital)}</div>
-            {achievedR !== null && <div style={{ fontSize: 12, color: C.textM, fontFamily: F_MONO, marginTop: 4 }}>{achievedR > 0 ? "+" : ""}{achievedR.toFixed(2)}R achieved</div>}
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{trade.stockName ? `${trade.stockName} Fut` : trade.market} · {trade.direction}</div>
+        <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO, marginBottom: 20 }}>Entry {trade.entry} · SL {slPrice}{targetPrice ? ` · Target ${targetPrice}` : ""}</div>
+        <Label style={{ marginBottom: 10 }}>How did it close?</Label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
+          {OPTIONS.map(opt => (
+            <div key={opt.id} onClick={() => !opt.disabled && setCloseType(opt.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: closeType === opt.id ? opt.color + "12" : C.surface2, border: `1px solid ${closeType === opt.id ? opt.color + "50" : C.border}`, borderRadius: 6, cursor: opt.disabled ? "not-allowed" : "pointer", opacity: opt.disabled ? 0.5 : 1 }}>
+              <div style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${closeType === opt.id ? opt.color : C.borderH}`, background: closeType === opt.id ? opt.color : "transparent", flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: closeType === opt.id ? C.text : C.textM, fontWeight: 600 }}>{opt.label}</div>
+                <div style={{ fontSize: 11, color: C.textD, marginTop: 1 }}>{opt.sub}</div>
+              </div>
+              {opt.price && closeType === opt.id && opt.id !== "custom" && (
+                <div style={{ fontSize: 15, color: opt.color, fontFamily: F_MONO, fontWeight: 700 }}>{opt.price}</div>
+              )}
+            </div>
+          ))}
+        </div>
+        {closeType === "custom" && (
+          <div style={{ marginBottom: 14 }}>
+            <Label style={{ marginBottom: 6 }}>Exit Price</Label>
+            <Input type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} placeholder="Your exit price" />
+          </div>
+        )}
+        <div style={{ marginBottom: 16 }}>
+          <Label style={{ marginBottom: 6 }}>Exit Date</Label>
+          <Input type="date" value={exitDate} onChange={e => setExitDate(e.target.value)} />
+        </div>
+        {finalExit && closeType && (
+          <div style={{ background: (m.pnl || 0) >= 0 ? C.green + "15" : C.red + "15", border: `1px solid ${(m.pnl || 0) >= 0 ? C.green : C.red}40`, borderRadius: 6, padding: 14, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 11, color: C.textD }}>Realized P&L</div>
+                <div style={{ fontSize: 26, color: (m.pnl || 0) >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{dAmt(m.pnl, cur, false)}</div>
+              </div>
+              {achievedR !== null && (
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: C.textD }}>Achieved</div>
+                  <div style={{ fontSize: 22, color: achievedR >= 1 ? C.green : achievedR >= 0 ? C.amber : C.red, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{achievedR > 0 ? "+" : ""}{achievedR}R</div>
+                </div>
+              )}
+            </div>
           </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <Btn variant="ghost" onClick={() => setCloseTrade(null)} size="lg" style={{ flex: 1 }}>Cancel</Btn>
-          <Btn variant="primary" onClick={() => { if (!exitPrice) return; saveTrades(trades.map(t => t.id === trade.id ? { ...t, status: "Closed", exitPrice, exitDate } : t)); setCloseTrade(null); }} size="lg" style={{ flex: 2 }} disabled={!exitPrice}>Close Trade</Btn>
+          <Btn variant="primary" onClick={doClose} size="lg" style={{ flex: 2 }} disabled={!finalExit || !closeType}>
+            {closeType === "sl" ? "Close at Stop" : closeType === "target" ? "Close at Target" : "Close Trade"}
+          </Btn>
         </div>
       </div>
     </div>
@@ -1218,10 +1274,153 @@ function Dashboard({ metrics, settings, trades, hideCapital, hideMode, combined,
   );
 }
 
+function AddToPositionModal({ trade, setAddToPosition, trades, saveTrades, settings }) {
+  const [addType, setAddType] = useState(""); // "scale" | "pyramid"
+  const [lots, setLots] = useState("");
+  const [newEntry, setNewEntry] = useState(trade.cmp || "");
+  const [newSL, setNewSL] = useState(trade.currentSL || trade.stopLoss || "");
+  const [newTarget, setNewTarget] = useState(trade.target || "");
+  const [conviction, setConviction] = useState(7);
+  const m = calcMetrics(trade);
+  const cur = trade.platform === "AB" ? "₹" : "$";
+  const totalCap = settings.totalCapital || 12000000;
+  const mult = +trade.multiplier || 1;
+
+  // New trade risk
+  const newStopDist = newEntry && newSL ? Math.abs(+newEntry - +newSL) : 0;
+  const newRiskAmt = newStopDist > 0 && lots ? +lots * mult * newStopDist : 0;
+  const newRiskPct = totalCap > 0 ? (newRiskAmt / totalCap) * 100 : 0;
+
+  // Combined after add
+  const totalLots = +trade.qty + (+lots || 0);
+  const avgEntry = lots && newEntry ? ((+trade.qty * +trade.entry) + (+lots * +newEntry)) / totalLots : +trade.entry;
+
+  const isPyramid = addType === "pyramid";
+  const isScale = addType === "scale";
+
+  const validPyramid = isPyramid && (trade.direction === "Long" ? +newEntry > +trade.entry : +newEntry < +trade.entry);
+  const validScale = isScale && +newEntry !== 0;
+  const canAdd = (validPyramid || validScale) && lots > 0 && newEntry && newSL;
+
+  const doAdd = () => {
+    if (!canAdd) return;
+    // Create a new linked trade entry
+    const addedTrade = {
+      ...trade,
+      id: "trade_" + Date.now(),
+      qty: lots.toString(),
+      entry: newEntry,
+      stopLoss: newSL,
+      currentSL: newSL,
+      target: newTarget || trade.target,
+      conviction,
+      status: "Open",
+      date: today(),
+      setupTag: isPyramid ? "Pyramid Add" : "Scale In",
+      parentId: trade.id,
+      pnl: null, exitPrice: null, exitDate: null,
+    };
+    // If pyramid — update original trade's SL to new tighter SL
+    const updatedTrades = isPyramid
+      ? trades.map(t => t.id === trade.id ? { ...t, currentSL: newSL } : t)
+      : trades;
+    saveTrades([addedTrade, ...updatedTrades]);
+    setAddToPosition(null);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, maxWidth: 460, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ fontSize: 11, letterSpacing: 3, color: C.accent, textTransform: "uppercase", marginBottom: 4 }}>Add to Position</div>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{trade.market} · {trade.direction}</div>
+        <div style={{ fontSize: 12, color: C.textD, fontFamily: F_MONO, marginBottom: 20 }}>Current: {trade.qty} lots @ {trade.entry} · SL {trade.currentSL || trade.stopLoss}</div>
+
+        {/* Type selector */}
+        <div style={{ marginBottom: 20 }}>
+          <Label style={{ marginBottom: 10 }}>Why are you adding?</Label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div onClick={() => setAddType("scale")} style={{ padding: "12px 16px", background: isScale ? C.green + "12" : C.surface2, border: `1px solid ${isScale ? C.green + "50" : C.border}`, borderRadius: 6, cursor: "pointer" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${isScale ? C.green : C.borderH}`, background: isScale ? C.green : "transparent" }} />
+                <div>
+                  <div style={{ fontSize: 13, color: isScale ? C.text : C.textM, fontWeight: 600 }}>Scale In</div>
+                  <div style={{ fontSize: 11, color: C.textD, marginTop: 2 }}>Planned from start — adding the second half at your intended price</div>
+                </div>
+              </div>
+            </div>
+            <div onClick={() => setAddType("pyramid")} style={{ padding: "12px 16px", background: isPyramid ? C.amber + "12" : C.surface2, border: `1px solid ${isPyramid ? C.amber + "50" : C.border}`, borderRadius: 6, cursor: "pointer" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${isPyramid ? C.amber : C.borderH}`, background: isPyramid ? C.amber : "transparent" }} />
+                <div>
+                  <div style={{ fontSize: 13, color: isPyramid ? C.text : C.textM, fontWeight: 600 }}>Pyramid</div>
+                  <div style={{ fontSize: 11, color: C.textD, marginTop: 2 }}>Trade is working — adding at a better price with tighter SL</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {isPyramid && !validPyramid && lots && newEntry && (
+            <div style={{ fontSize: 11, color: C.red, marginTop: 8 }}>
+              ⚠ Pyramid entry must be {trade.direction === "Long" ? "above" : "below"} your original entry ({trade.entry}). This looks like averaging down.
+            </div>
+          )}
+        </div>
+
+        {addType && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <div><Label style={{ marginBottom: 6 }}>Lots to Add</Label><Input type="number" value={lots} onChange={e => setLots(e.target.value)} placeholder="e.g. 2" /></div>
+              <div><Label style={{ marginBottom: 6 }}>Entry Price</Label><Input type="number" value={newEntry} onChange={e => setNewEntry(e.target.value)} placeholder="0.00" /></div>
+              <div>
+                <Label style={{ marginBottom: 6 }}>New Stop Loss {isPyramid && <span style={{ fontSize: 9, color: C.amber }}>tighter for both</span>}</Label>
+                <Input type="number" value={newSL} onChange={e => setNewSL(e.target.value)} placeholder="0.00" style={{ borderColor: isPyramid ? C.amber + "60" : undefined }} />
+                {isPyramid && <div style={{ fontSize: 10, color: C.amber, marginTop: 4 }}>Will update original trade SL to this</div>}
+              </div>
+              <div><Label style={{ marginBottom: 6 }}>Target</Label><Input type="number" value={newTarget} onChange={e => setNewTarget(e.target.value)} placeholder={trade.target || "0.00"} /></div>
+            </div>
+
+            {/* Conviction */}
+            <div style={{ marginBottom: 14 }}>
+              <Label style={{ marginBottom: 8 }}>Conviction</Label>
+              <div style={{ display: "flex", gap: 4 }}>
+                {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                  <button key={n} onClick={() => setConviction(n)} style={{ flex: 1, padding: "7px 0", background: conviction >= n ? (n >= 8 ? C.green + "30" : n >= 6 ? C.amber + "20" : C.red + "20") : C.surface2, color: conviction >= n ? (n >= 8 ? C.green : n >= 6 ? C.amber : C.red) : C.textD, border: `1px solid ${conviction >= n ? (n >= 8 ? C.green : n >= 6 ? C.amber : C.red) + "50" : C.border}`, borderRadius: 4, fontSize: 11, fontFamily: F_MONO, cursor: "pointer" }}>{n}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Preview */}
+            {lots && newEntry && (
+              <div style={{ background: C.surface2, borderRadius: 6, padding: 12, marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1, marginBottom: 8 }}>AFTER ADDING</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                  <div><div style={{ fontSize: 9, color: C.textD }}>TOTAL LOTS</div><div style={{ fontSize: 14, color: C.text, fontFamily: F_MONO, fontWeight: 600, marginTop: 2 }}>{totalLots}</div></div>
+                  <div><div style={{ fontSize: 9, color: C.textD }}>AVG ENTRY</div><div style={{ fontSize: 14, color: C.text, fontFamily: F_MONO, fontWeight: 600, marginTop: 2 }}>{avgEntry.toFixed(2)}</div></div>
+                  <div><div style={{ fontSize: 9, color: C.textD }}>NEW RISK</div><div style={{ fontSize: 14, color: newRiskPct > 2 ? C.red : C.textM, fontFamily: F_MONO, fontWeight: 600, marginTop: 2 }}>{dAmt(newRiskAmt, cur, false)}</div></div>
+                </div>
+                {newRiskPct > 2 && <div style={{ fontSize: 11, color: C.red, marginTop: 8 }}>⚠ This add puts {newRiskPct.toFixed(2)}% at risk — above 2% threshold</div>}
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <Btn variant="ghost" onClick={() => setAddToPosition(null)} size="lg" style={{ flex: 1 }}>Cancel</Btn>
+          <Btn variant="primary" onClick={doAdd} size="lg" style={{ flex: 2 }} disabled={!canAdd}>
+            Add {lots || "?"} Lots
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const PARTIAL_REASONS = ["Hit partial target", "Protecting profit", "Reducing size before news", "Trailing stop hit", "Uncertain — just reducing"];
+
 function PartialCloseModal({ trade, setPartialClose, trades, saveTrades, hideCapital }) {
   const [lots, setLots] = useState("");
   const [exitPrice, setExitPrice] = useState(trade.cmp || "");
   const [exitDate, setExitDate] = useState(today());
+  const [reason, setReason] = useState("");
   const m = calcMetrics(trade);
   const cur = trade.platform === "AB" ? "₹" : "$";
   const maxLots = +trade.qty;
@@ -1231,10 +1430,17 @@ function PartialCloseModal({ trade, setPartialClose, trades, saveTrades, hideCap
   const partialPnl = exitPrice && trade.entry && closingLots > 0
     ? (isLong ? +exitPrice - +trade.entry : +trade.entry - +exitPrice) * closingLots * (+trade.multiplier || 1)
     : null;
+  const achievedR = partialPnl !== null && m.stopDist > 0
+    ? (partialPnl / (closingLots * (+trade.multiplier || 1))) / m.stopDist
+    : null;
 
   const doPartialClose = () => {
     if (!exitPrice || closingLots <= 0 || closingLots >= maxLots) return;
-    const closedTrade = { ...trade, id: "trade_" + Date.now(), qty: closingLots.toString(), status: "Closed", exitPrice, exitDate, pnl: partialPnl, parentId: trade.id + "_partial" };
+    const closedTrade = {
+      ...trade, id: "trade_" + Date.now(), qty: closingLots.toString(),
+      status: "Closed", exitPrice, exitDate, pnl: partialPnl,
+      exitReason: reason || "Partial close", parentId: trade.id + "_partial",
+    };
     const remainingTrade = { ...trade, qty: remainingLots.toString() };
     saveTrades([closedTrade, ...trades.map(t => t.id === trade.id ? remainingTrade : t)]);
     setPartialClose(null);
@@ -1242,7 +1448,7 @@ function PartialCloseModal({ trade, setPartialClose, trades, saveTrades, hideCap
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, maxWidth: 400, width: "100%" }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, maxWidth: 420, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
         <div style={{ fontSize: 11, letterSpacing: 3, color: C.accent, textTransform: "uppercase", marginBottom: 4 }}>Partial Close</div>
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>{trade.market} · {trade.direction} · {maxLots} lots</div>
         <div style={{ marginBottom: 14 }}>
@@ -1254,19 +1460,40 @@ function PartialCloseModal({ trade, setPartialClose, trades, saveTrades, hideCap
           <Label style={{ marginBottom: 6 }}>Exit Price</Label>
           <Input type="number" value={exitPrice} onChange={e => setExitPrice(e.target.value)} placeholder="0.00" />
         </div>
-        <div style={{ marginBottom: 18 }}>
+        <div style={{ marginBottom: 14 }}>
           <Label style={{ marginBottom: 6 }}>Exit Date</Label>
           <Input type="date" value={exitDate} onChange={e => setExitDate(e.target.value)} />
         </div>
+        <div style={{ marginBottom: 16 }}>
+          <Label style={{ marginBottom: 8 }}>Why are you closing partial?</Label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {PARTIAL_REASONS.map(r => (
+              <div key={r} onClick={() => setReason(r)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: reason === r ? C.accent + "15" : C.surface2, border: `1px solid ${reason === r ? C.accent + "50" : C.border}`, borderRadius: 5, cursor: "pointer" }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${reason === r ? C.accent : C.borderH}`, background: reason === r ? C.accent : "transparent", flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: reason === r ? C.text : C.textM }}>{r}</span>
+              </div>
+            ))}
+          </div>
+        </div>
         {partialPnl !== null && (
           <div style={{ background: partialPnl >= 0 ? C.green + "15" : C.red + "15", border: `1px solid ${partialPnl >= 0 ? C.green : C.red}40`, borderRadius: 6, padding: 12, marginBottom: 16 }}>
-            <div style={{ fontSize: 11, color: C.textD }}>Realized P&L on {closingLots} lots</div>
-            <div style={{ fontSize: 22, color: partialPnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{dAmt(partialPnl, cur, false)}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 11, color: C.textD }}>Realized P&L · {closingLots} lots</div>
+                <div style={{ fontSize: 22, color: partialPnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{dAmt(partialPnl, cur, false)}</div>
+              </div>
+              {achievedR !== null && <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: C.textD }}>Achieved</div>
+                <div style={{ fontSize: 18, color: achievedR >= 1 ? C.green : achievedR >= 0 ? C.amber : C.red, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{achievedR > 0 ? "+" : ""}{achievedR.toFixed(1)}R</div>
+              </div>}
+            </div>
           </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <Btn variant="ghost" onClick={() => setPartialClose(null)} size="lg" style={{ flex: 1 }}>Cancel</Btn>
-          <Btn variant="primary" onClick={doPartialClose} size="lg" style={{ flex: 2 }} disabled={!exitPrice || closingLots <= 0}>Close {closingLots > 0 ? closingLots : "?"} Lots</Btn>
+          <Btn variant="primary" onClick={doPartialClose} size="lg" style={{ flex: 2 }} disabled={!exitPrice || closingLots <= 0}>
+            Close {closingLots > 0 ? closingLots : "?"} Lots
+          </Btn>
         </div>
       </div>
     </div>
@@ -1277,6 +1504,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
   const [filter, setFilter] = useState("All");
   const [pf, setPf] = useState("All");
   const [partialClose, setPartialClose] = useState(null);
+  const [addToPosition, setAddToPosition] = useState(null);
   const filtered = trades.filter(t => (filter === "All" || t.status === filter) && (pf === "All" || t.platform === pf));
   const del = (id) => { if (confirm("Delete this trade?")) saveTrades(trades.filter(t => t.id !== id)); };
   const activate = (id) => saveTrades(trades.map(t => t.id === id ? { ...t, status: "Open" } : t));
@@ -1327,6 +1555,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
   if (isMobile) return (
     <div>
       {partialClose && <PartialCloseModal trade={partialClose} setPartialClose={setPartialClose} trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} />}
+      {addToPosition && <AddToPositionModal trade={addToPosition} setAddToPosition={setAddToPosition} trades={trades} saveTrades={saveTrades} settings={settings} />}
       <SummaryBar />
       <FilterBar />
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1374,7 +1603,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
                   { label: "STOP", val: `${t.currentSL || t.stopLoss}${m.slAtBE ? " ✓" : ""}`, color: m.slAtBE ? C.green : C.textM },
                   { label: "TARGET", val: t.target || "—", color: C.textM },
                   { label: "CAP USED", val: capUsed ? dAmt(capUsed, cur, hideCapital) : "—", color: capUsed ? C.amber : C.textD, sub: capUsed ? null : "enter margin/lot" },
-                  { label: "1R LEVEL", val: oneRLevel ? oneRLevel.toFixed(1) : "—", color: C.green, sub: "move SL to entry" },
+                  { label: "RISK AMT", val: m.slAtBE ? "0 (BE)" : m.riskAmt > 0 ? dAmt(m.riskAmt, cur, hideCapital) : "—", color: m.slAtBE ? C.green : C.textM },
                   { label: "TARGET AMT", val: finalTargetAmt ? dAmt(finalTargetAmt, cur, hideCapital) : "—", color: C.accent },
                 ].map(({ label, val, color, sub }) => (
                   <div key={label} style={{ background: C.surface2, padding: "9px 12px" }}>
@@ -1386,10 +1615,10 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
               </div>
 
               {/* ── METADATA: R:R · Lots · Risk (small, below grid) ── */}
-              <div style={{ padding: "7px 16px", background: C.dim, display: "flex", gap: 16 }}>
-                <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>R:R <span style={{ color: m.rr >= 3 ? C.green : m.rr > 0 ? C.amber : C.textD }}>{m.rr ? `1:${m.rr}` : "—"}</span></span>
+              <div style={{ padding: "7px 16px", background: C.dim, display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>R:R <span style={{ color: m.rr >= 3 ? C.green : m.rr > 0 ? C.amber : C.textD }}>1:{m.rr || "—"}</span></span>
+                <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>1R <span style={{ color: C.green }}>{oneRLevel ? oneRLevel.toFixed(1) : "—"}</span></span>
                 <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>Lots <span style={{ color: C.text }}>{t.qty}</span></span>
-                <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>Risk <span style={{ color: m.slAtBE ? C.green : C.textM }}>{m.slAtBE ? "0 (BE)" : dAmt(m.riskAmt, cur, hideCapital)}</span></span>
                 {t.conviction && <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>Conv <span style={{ color: +t.conviction >= 8 ? C.green : +t.conviction >= 6 ? C.amber : C.red }}>{t.conviction}/10</span></span>}
               </div>
 
@@ -1425,13 +1654,15 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
               )}
 
               {/* ── ACTIONS ── */}
-              <div style={{ padding: "10px 16px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ padding: "10px 16px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {isPending && <Btn variant="success" onClick={() => activate(t.id)} size="md" style={{ flex: 1 }}>Activate</Btn>}
-                {isOpen && <Btn variant="danger" onClick={() => setCloseTrade(t)} size="md" style={{ flex: 1 }}>Close All</Btn>}
-                {isOpen && +t.qty > 1 && <Btn onClick={() => setPartialClose(t)} size="md" style={{ flex: 1, color: C.amber, borderColor: C.amber + "50" }}>Partial Close</Btn>}
-                {isOpen && !t.parentId && <Btn onClick={() => setPyramidTrade(t)} size="md" style={{ color: C.textM }}>+ Pyr</Btn>}
-                <Btn onClick={() => setEditTrade(t)} size="sm">Edit</Btn>
-                <Btn variant="danger" onClick={() => del(t.id)} size="sm">×</Btn>
+                {isOpen && <Btn variant="danger" onClick={() => setCloseTrade(t)} size="md" style={{ flex: 1, minWidth: 90 }}>Close All</Btn>}
+                {isOpen && +t.qty > 1 && <Btn onClick={() => setPartialClose(t)} size="md" style={{ flex: 1, minWidth: 110, color: C.amber, borderColor: C.amber + "50" }}>Partial Close</Btn>}
+                {isOpen && !t.parentId && <Btn onClick={() => setPyramidTrade(t)} size="md" style={{ flex: 1, minWidth: 90, color: C.textM }}>+ Pyramid</Btn>}
+                <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                  <Btn onClick={() => setEditTrade(t)} size="sm" style={{ padding: "5px 12px", fontSize: 11 }}>Edit</Btn>
+                  <Btn variant="danger" onClick={() => del(t.id)} size="sm" style={{ padding: "5px 10px", fontSize: 11 }}>✕</Btn>
+                </div>
               </div>
             </div>
           );
@@ -1444,6 +1675,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
   return (
     <div>
       {partialClose && <PartialCloseModal trade={partialClose} setPartialClose={setPartialClose} trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} />}
+      {addToPosition && <AddToPositionModal trade={addToPosition} setAddToPosition={setAddToPosition} trades={trades} saveTrades={saveTrades} settings={settings} />}
       <SummaryBar />
       <FilterBar />
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
@@ -1480,6 +1712,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
                       {t.status === "Pending" && <Btn variant="success" onClick={() => activate(t.id)} size="sm" style={{ marginRight: 4 }}>Go</Btn>}
                       {t.status === "Open" && <Btn variant="danger" onClick={() => setCloseTrade(t)} size="sm" style={{ marginRight: 4 }}>Close</Btn>}
                       {t.status === "Open" && +t.qty > 1 && <Btn onClick={() => setPartialClose(t)} size="sm" style={{ color: C.amber, borderColor: C.amber + "50", marginRight: 4 }}>Part.</Btn>}
+                      {t.status === "Open" && <Btn onClick={() => setAddToPosition(t)} size="sm" style={{ color: C.green, borderColor: C.green + "50", marginRight: 4 }}>+Add</Btn>}
                       <Btn onClick={() => setEditTrade(t)} size="sm" style={{ marginRight: 4 }}>Edit</Btn>
                       <Btn variant="danger" onClick={() => del(t.id)} size="sm">×</Btn>
                     </td>
@@ -1500,6 +1733,7 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
     entry: "", stopLoss: "", target: "", qty: "", marginPerLot: "", conviction: 7,
     status: "Pending", setupTag: SETUP_TAGS[0], multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"],
     stockName: "",
+    customSetup: "",
   });
   const [preTrade, setPreTrade] = useState(PRE_TRADE_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}));
 
@@ -1523,7 +1757,7 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
   const submit = () => {
     if (!t.entry || !t.stopLoss || !t.qty) { alert("Entry, Stop Loss, Quantity are required"); return; }
     if (isStockFut && !t.multiplier) { alert("Contract multiplier required for Stock Futures"); return; }
-    saveTrades([{ ...t, id: "trade_" + Date.now(), checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}), pnl: null, exitPrice: null, exitDate: null, preTrade, mistakeTag: null, exitReason: null }, ...trades]);
+    const finalTag = t.setupTag === "Other" && t.customSetup ? t.customSetup : t.setupTag; saveTrades([{ ...t, id: "trade_" + Date.now(), setupTag: finalTag, checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}), pnl: null, exitPrice: null, exitDate: null, preTrade, mistakeTag: null, exitReason: null }, ...trades]);
     setPage("positions");
   };
 
@@ -1581,7 +1815,13 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
             </div>
             <div style={{ fontSize: 10, marginTop: 5, color: t.conviction >= 8 ? C.green : t.conviction >= 6 ? C.amber : C.red }}>{t.conviction >= 8 ? "High conviction — good to go" : t.conviction >= 6 ? "Medium — double-check setup" : "Low — consider skipping"}</div>
           </div>
-          <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}><Label style={{ marginBottom: 6 }}>Setup Type</Label><Select value={t.setupTag} onChange={e => setT({ ...t, setupTag: e.target.value })} options={SETUP_TAGS} /></div>
+          <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
+            <Label style={{ marginBottom: 6 }}>Setup Type</Label>
+            <Select value={t.setupTag} onChange={e => setT({ ...t, setupTag: e.target.value, customSetup: "" })} options={SETUP_TAGS} />
+            {t.setupTag === "Other" && (
+              <Input value={t.customSetup || ""} onChange={e => setT({ ...t, customSetup: e.target.value })} placeholder="Describe your setup..." style={{ marginTop: 8 }} />
+            )}
+          </div>
         </div>
       </div>
 
@@ -1970,11 +2210,11 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
     platform: "AB", entry: "", sl: "", riskPct: recommendedRisk, rr: 3,
     market: "MCX Gold Mini", direction: "Long",
     multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"], marginPerLot: "",
-    manualLots: "", // for reverse mode
+    manualLots: "", stockName: "",
   });
   const [mode, setMode] = useState("auto"); // "auto" = risk%→lots | "manual" = lots→risk%
 
-  const onMarketChange = (m) => setC({ ...c, market: m, multiplier: CONTRACT_MULTIPLIERS[m] !== undefined ? CONTRACT_MULTIPLIERS[m] : 1 });
+  const onMarketChange = (m) => setC({ ...c, market: m, multiplier: CONTRACT_MULTIPLIERS[m] !== undefined ? CONTRACT_MULTIPLIERS[m] : 1, stockName: "" });
   const onPlatformChange = (p) => { const m = p === "AB" ? MARKETS_INR[0] : MARKETS_USD[0]; setC({ ...c, platform: p, market: m, multiplier: CONTRACT_MULTIPLIERS[m] !== undefined ? CONTRACT_MULTIPLIERS[m] : 1 }); };
 
   const totalCapInr = settings.inrCapital + settings.usdCapital * settings.fxRate;
@@ -2009,6 +2249,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
 
   const showMultiplier = c.platform === "AB";
   const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(c.market);
+  const isStockFutCalc = c.market === "Stock Futures";
   const grid2 = isMobile ? "1fr" : "1fr 1fr";
 
   const saveAsPending = () => {
@@ -2020,6 +2261,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
       target: target > 0 ? target.toFixed(2) : "",
       qty: needsWholeLot ? qty.toString() : qty.toFixed(2),
       marginPerLot: c.marginPerLot || "",
+      stockName: c.stockName || "",
       riskPct: c.riskPct, status: "Pending", setupTag: SETUP_TAGS[0],
       multiplier: mult,
       checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}),
@@ -2066,6 +2308,12 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
         <div style={{ display: "grid", gridTemplateColumns: grid2, gap: 12 }}>
           <div><Label style={{ marginBottom: 6 }}>Platform</Label><Select value={c.platform} onChange={e => onPlatformChange(e.target.value)} options={[{ value: "AB", label: "Aditya Birla (₹)" }, { value: "Exness", label: "Exness ($)" }]} /></div>
           <div><Label style={{ marginBottom: 6 }}>Market</Label><Select value={c.market} onChange={e => onMarketChange(e.target.value)} options={c.platform === "AB" ? MARKETS_INR : MARKETS_USD} /></div>
+          {isStockFutCalc && (
+            <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
+              <Label style={{ marginBottom: 6 }}>Stock Name <span style={{ color: C.red, fontSize: 9 }}>required</span></Label>
+              <Input value={c.stockName || ""} onChange={e => setC({ ...c, stockName: e.target.value })} placeholder="e.g. HDFC Bank, Reliance" />
+            </div>
+          )}
           <div><Label style={{ marginBottom: 6 }}>Direction</Label><Select value={c.direction} onChange={e => setC({ ...c, direction: e.target.value })} options={["Long", "Short"]} /></div>
           <div>
             <Label style={{ marginBottom: 6 }}>Risk %</Label>
