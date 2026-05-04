@@ -564,7 +564,7 @@ export default function ApexTerminal() {
           {page === "addtrade" && <AddTrade trades={trades} saveTrades={saveTrades} settings={settings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} />}
           {page === "journal" && <Journal trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} isMobile={isMobile} />}
           {page === "returns" && <Returns trades={trades} settings={settings} hideCapital={hideCapital} isMobile={isMobile} />}
-          {page === "rules" && <Rules metrics={metrics} />}
+          {page === "rules" && <Rules metrics={metrics} settings={settings} />}
           {page === "calculator" && <Calculator settings={settings} trades={trades} saveTrades={saveTrades} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} />}
         </div>
       </div>
@@ -1345,7 +1345,7 @@ function Dashboard({ metrics, settings, trades, hideCapital, hideMode, combined,
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2,1fr)" : "repeat(4,1fr)", gap: 14 }}>
           {[
             { label: "Monthly Return", value: hideCapital ? "•••" : `${metrics.monthReturnPct >= 0 ? "+" : ""}${metrics.monthReturnPct.toFixed(2)}%`, sub: "Target 6–10%", color: metrics.monthReturnPct >= 6 ? C.green : metrics.monthReturnPct >= 0 ? C.text : C.red },
-            { label: "Weekly P&L", value: dAmt((metrics.weekInrPnl||0)+(metrics.weekUsdPnl||0)*(settings.fxRate||100),"₹",hideCapital), sub: "This week", color: (metrics.weekInrPnl||0)+(metrics.weekUsdPnl||0)*(settings.fxRate||100) >= 0 ? C.green : C.red },
+            { label: "Weekly P&L", value: dAmt((metrics.weekInrPnl||0)+(metrics.weekUsdPnl||0)*(settings.fxRate||100),"₹",hideCapital), sub: `AB ${dAmt(metrics.weekInrPnl||0,"₹",hideCapital)} · Ex ${dAmt(metrics.weekUsdPnl||0,"$",hideCapital)}`, color: (metrics.weekInrPnl||0)+(metrics.weekUsdPnl||0)*(settings.fxRate||100) >= 0 ? C.green : C.red },
             { label: "Month ₹ P&L", value: dAmt(metrics.monthInrPnl,"₹",hideCapital), sub: "AB platform", color: metrics.monthInrPnl >= 0 ? C.green : C.red },
             { label: "Losses Today", value: String(metrics.todayLosses), sub: "3 = stop trading", color: metrics.todayLosses >= 3 ? C.red : metrics.todayLosses >= 2 ? C.amber : C.text },
           ].map(s => (
@@ -1861,8 +1861,19 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
   });
   const [preTrade, setPreTrade] = useState(PRE_TRADE_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}));
 
-  const onMarketChange = (mkt) => setT({ ...t, market: mkt, multiplier: CONTRACT_MULTIPLIERS[mkt] !== undefined ? CONTRACT_MULTIPLIERS[mkt] : 1, stockName: "" });
-  const onPlatformChange = (p) => { const mkt = p === "AB" ? MARKETS_INR[0] : MARKETS_USD[0]; setT({ ...t, platform: p, market: mkt, multiplier: CONTRACT_MULTIPLIERS[mkt] !== undefined ? CONTRACT_MULTIPLIERS[mkt] : 1, stockName: "" }); };
+  const onMarketChange = (mkt) => {
+    const mult = t.platform === "Exness"
+      ? (EXNESS_MULTIPLIERS[mkt] !== undefined ? EXNESS_MULTIPLIERS[mkt] : 1)
+      : (CONTRACT_MULTIPLIERS[mkt] !== undefined ? CONTRACT_MULTIPLIERS[mkt] : 1);
+    setT({ ...t, market: mkt, multiplier: mult, stockName: "" });
+  };
+  const onPlatformChange = (p) => {
+    const mkt = p === "AB" ? MARKETS_INR[0] : MARKETS_USD[0];
+    const mult = p === "Exness"
+      ? (EXNESS_MULTIPLIERS[mkt] !== undefined ? EXNESS_MULTIPLIERS[mkt] : 1)
+      : (CONTRACT_MULTIPLIERS[mkt] !== undefined ? CONTRACT_MULTIPLIERS[mkt] : 1);
+    setT({ ...t, platform: p, market: mkt, multiplier: mult, stockName: "" });
+  };
 
   const m = calcMetrics(t);
   const cur = t.platform === "AB" ? "₹" : "$";
@@ -2006,49 +2017,64 @@ function EditTradeModal({ trade, setEditTrade, trades, saveTrades }) {
   const [t, setT] = useState({ ...trade });
   const m = calcMetrics(t);
   const cur = t.platform === "AB" ? "₹" : "$";
+  const isStockFut = t.market === "Stock Futures";
   const save = () => {
     const updated = { ...t };
     if (updated.status === "Closed" && !updated.exitDate) updated.exitDate = today();
+    if (updated.status === "Closed" && updated.exitPrice) {
+      const isLong = updated.direction === "Long";
+      const mult = +updated.multiplier || 1;
+      const diff = isLong ? +updated.exitPrice - +updated.entry : +updated.entry - +updated.exitPrice;
+      updated.pnl = diff * +updated.qty * mult;
+    }
     saveTrades(trades.map(tr => tr.id === t.id ? updated : tr));
     setEditTrade(null);
   };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflow: "auto" }}>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, maxWidth: 600, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, maxWidth: 620, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
         <div style={{ fontSize: 11, letterSpacing: 3, color: C.accent, textTransform: "uppercase", marginBottom: 4 }}>Edit Trade</div>
-        <div style={{ fontSize: 16, color: C.text, marginBottom: 20 }}>{t.market} · {t.platform === "AB" ? "Aditya Birla" : "Exness"}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 20 }}>{t.stockName || t.market} · {t.platform}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
           <div><Label style={{ marginBottom: 6 }}>Status</Label><Select value={t.status} onChange={e => setT({ ...t, status: e.target.value })} options={["Pending", "Open", "Closed"]} /></div>
           <div><Label style={{ marginBottom: 6 }}>Direction</Label><Select value={t.direction} onChange={e => setT({ ...t, direction: e.target.value })} options={["Long", "Short"]} /></div>
+          <div><Label style={{ marginBottom: 6 }}>Date</Label><Input type="date" value={t.date} onChange={e => setT({ ...t, date: e.target.value })} /></div>
+          <div><Label style={{ marginBottom: 6 }}>Lots / Qty</Label><Input type="number" value={t.qty} onChange={e => setT({ ...t, qty: e.target.value })} /></div>
           <div><Label style={{ marginBottom: 6 }}>Entry</Label><Input type="number" value={t.entry} onChange={e => setT({ ...t, entry: e.target.value })} /></div>
           <div><Label style={{ marginBottom: 6 }}>Stop Loss</Label><Input type="number" value={t.stopLoss} onChange={e => setT({ ...t, stopLoss: e.target.value })} /></div>
-          <div><Label style={{ marginBottom: 6 }}>Target</Label><Input type="number" value={t.target} onChange={e => setT({ ...t, target: e.target.value })} /></div>
-          <div><Label style={{ marginBottom: 6 }}>Quantity</Label><Input type="number" value={t.qty} onChange={e => setT({ ...t, qty: e.target.value })} /></div>
-          {t.platform === "AB" && (
-            <div><Label style={{ marginBottom: 6 }}>Multiplier</Label><Input type="number" value={t.multiplier ?? CONTRACT_MULTIPLIERS[t.market] ?? 1} onChange={e => setT({ ...t, multiplier: +e.target.value || 1 })} /></div>
-          )}
+          <div><Label style={{ marginBottom: 6 }}>Target</Label><Input type="number" value={t.target || ""} onChange={e => setT({ ...t, target: e.target.value })} /></div>
+          {t.platform === "AB" && <div><Label style={{ marginBottom: 6 }}>Multiplier</Label><Input type="number" value={t.multiplier ?? CONTRACT_MULTIPLIERS[t.market] ?? 1} onChange={e => setT({ ...t, multiplier: +e.target.value || 1 })} /></div>}
+          {isStockFut && <div style={{ gridColumn: "span 2" }}><Label style={{ marginBottom: 6 }}>Stock Name</Label><Input value={t.stockName || ""} onChange={e => setT({ ...t, stockName: e.target.value })} placeholder="e.g. HDFC Bank" /></div>}
+          <div><Label style={{ marginBottom: 6 }}>Setup Type</Label><Select value={t.setupTag || SETUP_TAGS[0]} onChange={e => setT({ ...t, setupTag: e.target.value })} options={SETUP_TAGS} /></div>
+          <div>
+            <Label style={{ marginBottom: 6 }}>Conviction</Label>
+            <div style={{ display: "flex", gap: 3 }}>
+              {[1,2,3,4,5,6,7,8,9,10].map(n => (
+                <button key={n} onClick={() => setT({ ...t, conviction: n })} style={{ flex: 1, padding: "6px 0", background: (t.conviction || 7) >= n ? C.accent + "30" : C.surface2, color: (t.conviction || 7) >= n ? C.accent : C.textD, border: `1px solid ${(t.conviction || 7) >= n ? C.accent + "50" : C.border}`, borderRadius: 3, fontSize: 10, fontFamily: F_MONO, cursor: "pointer" }}>{n}</button>
+              ))}
+            </div>
+          </div>
           {t.status === "Closed" && <>
             <div><Label style={{ marginBottom: 6 }}>Exit Price</Label><Input type="number" value={t.exitPrice ?? ""} onChange={e => setT({ ...t, exitPrice: e.target.value })} /></div>
             <div><Label style={{ marginBottom: 6 }}>Exit Date</Label><Input type="date" value={t.exitDate ?? today()} onChange={e => setT({ ...t, exitDate: e.target.value })} /></div>
           </>}
         </div>
         {t.status === "Closed" && m.pnl !== null && (
-          <div style={{ background: m.pnl >= 0 ? C.greenD + "20" : C.redD + "20", border: `1px solid ${m.pnl >= 0 ? C.green : C.red}40`, borderRadius: 6, padding: 12, marginBottom: 16 }}>
+          <div style={{ background: m.pnl >= 0 ? C.green + "15" : C.red + "15", border: `1px solid ${m.pnl >= 0 ? C.green : C.red}40`, borderRadius: 6, padding: 12, marginBottom: 14 }}>
             <Label>Realized P&L</Label>
-            <div style={{ fontSize: 22, color: m.pnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 600, marginTop: 4 }}>{fmt(m.pnl, cur)}</div>
+            <div style={{ fontSize: 22, color: m.pnl >= 0 ? C.green : C.red, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{fmt(m.pnl, cur)}</div>
           </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <Btn variant="ghost" onClick={() => setEditTrade(null)} size="lg" style={{ flex: 1 }}>Cancel</Btn>
-          <Btn variant="primary" onClick={save} size="lg" style={{ flex: 2 }}>Save</Btn>
+          <Btn variant="primary" onClick={save} size="lg" style={{ flex: 2 }}>Save Changes</Btn>
         </div>
       </div>
     </div>
   );
 }
 
-// ════════════════ PYRAMID MODAL ════════════════
 function PyramidModal({ trade, setPyramidTrade, trades, saveTrades }) {
   const parent = trade;
   const isLong = parent.direction === "Long";
@@ -2401,16 +2427,19 @@ function Returns({ trades, settings, hideCapital, isMobile }) {
   );
 }
 
-function Rules({ metrics }) {
+function Rules({ metrics, settings }) {
+  const dLimit = settings?.dailyDDLimit || 3;
+  const wLimit = settings?.weeklyDDLimit || 6;
+  const mLimit = settings?.monthlyDDLimit || 10;
   const checks = [
-    { label: "All trades within 2.5% risk (total capital)", ok: !metrics.breaches.find(b => b.msg.includes("2.5%")) },
-    { label: "Less than 3 losses today", ok: metrics.todayLosses < 3 },
-    { label: "Daily drawdown above -3%", ok: metrics.dayDD > -3 },
-    { label: "Weekly drawdown above -5%", ok: metrics.weekDD > -5 },
-    { label: "Monthly drawdown above -10%", ok: metrics.monthDD > -10 },
-    { label: "Trades with active risk: under 5", ok: metrics.openWithRiskCount < 5 },
-    { label: "Weekly HWM not locked", ok: !metrics.weekLockdownActive },
-    { label: "Monthly HWM not locked", ok: !metrics.monthLockdownActive },
+    { label: "Risk per trade ≤ 2.5%", ok: !metrics.breaches.find(b => b.msg.includes("2.5%")), val: `${metrics.totalRiskPct.toFixed(2)}% open` },
+    { label: "Losses today < 3", ok: metrics.todayLosses < 3, val: `${metrics.todayLosses} today` },
+    { label: `Daily DD > -${dLimit}%`, ok: metrics.dayDD > -dLimit, val: `${metrics.dayDD.toFixed(2)}%` },
+    { label: `Weekly DD > -${wLimit}%`, ok: metrics.weekDD > -wLimit, val: `${metrics.weekDD.toFixed(2)}%` },
+    { label: `Monthly DD > -${mLimit}%`, ok: metrics.monthDD > -mLimit, val: `${metrics.monthDD.toFixed(2)}%` },
+    { label: "Active risk trades < 5", ok: metrics.openWithRiskCount < 5, val: `${metrics.openWithRiskCount}/5` },
+    { label: "Weekly HWM clear", ok: !metrics.weekLockdownActive, val: metrics.weekLockdownActive ? "LOCKED" : "clear" },
+    { label: "Monthly HWM clear", ok: !metrics.monthLockdownActive, val: metrics.monthLockdownActive ? "LOCKED" : "clear" },
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2420,7 +2449,10 @@ function Rules({ metrics }) {
           {checks.map((c, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", padding: "10px 0", borderBottom: i < checks.length - 1 ? `1px solid ${C.border}` : "none" }}>
               <Dot ok={c.ok} /><span style={{ fontSize: 12, color: c.ok ? C.text : C.red, flex: 1 }}>{c.label}</span>
-              <span style={{ fontSize: 10, color: c.ok ? C.green : C.red, fontFamily: F_MONO, letterSpacing: 1 }}>{c.ok ? "OK" : "BREACH"}</span>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, fontFamily: F_MONO, color: c.ok ? C.textD : C.red }}>{c.val}</div>
+                <div style={{ fontSize: 9, color: c.ok ? C.green : C.red, letterSpacing: 1, marginTop: 1 }}>{c.ok ? "OK" : "BREACH"}</div>
+              </div>
             </div>
           ))}
         </div>
@@ -2527,7 +2559,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
   const oneRLevel = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff : +c.entry - diff) : 0;
   const partialTarget = calcTarget ? (c.direction === "Long" ? +c.entry + (calcTarget - +c.entry) * 0.6 : +c.entry - (+c.entry - calcTarget) * 0.6) : 0;
 
-  const showMultiplier = c.platform === "AB";
+  const showMultiplier = true; // show for both platforms
   const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(c.market);
   const isStockFutCalc = c.market === "Stock Futures";
   const grid2 = isMobile ? "1fr" : "1fr 1fr";
@@ -2541,7 +2573,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
       target: calcTarget > 0 ? calcTarget.toFixed(2) : "",
       qty: needsWholeLot ? qty.toString() : qty.toFixed(2),
       marginPerLot: c.marginPerLot || "",
-      stockName: c.stockName || "",
+      stockName: c.stockName || (isCustom ? c.customMarket : "") || "",
       riskPct: c.riskPct, status: "Pending", setupTag: SETUP_TAGS[0],
       multiplier: mult,
       checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}),
