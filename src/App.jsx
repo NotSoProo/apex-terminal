@@ -423,7 +423,7 @@ export default function ApexTerminal() {
   const shared = { metrics, settings, trades, hideCapital, hideMode, combined, inrTotal, usdTotal, isMobile };
 
   return (
-    <div style={{ background: C.bg, minHeight: "100vh", maxHeight: "100vh", color: C.text, fontFamily: F_UI, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
+    <div style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: F_UI, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "visible" : "hidden" }}>
       {showPreMarket && <PreMarketModal preMarket={preMarket} savePreMarket={savePreMarket} setShowPreMarket={setShowPreMarket} setShowBrief={setShowBrief} />}
       {showBrief && <DailyBriefModal metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} setShowBrief={setShowBrief} />}
       {showSettings && <SettingsModal settings={settings} saveSettings={saveSettings} setShowSettings={setShowSettings} exportData={exportData} importData={importData} />}
@@ -539,7 +539,7 @@ export default function ApexTerminal() {
       )}
 
       {/* MAIN */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: "auto", overflowX: "hidden", height: "100vh" }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: isMobile ? "visible" : "auto", overflowX: "hidden", height: isMobile ? "auto" : "100vh", minHeight: isMobile ? "100vh" : "auto", background: C.bg }}>
         <div style={{ padding: isMobile ? "14px 16px" : "20px 28px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", background: C.bg, gap: 10, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 600, textTransform: "capitalize" }}>{page === "addtrade" ? "Add Trade" : page}</div>
@@ -557,7 +557,7 @@ export default function ApexTerminal() {
           </div>
         </div>
 
-        <div style={{ padding: isMobile ? "16px" : "28px" }}>
+        <div style={{ padding: isMobile ? "16px" : "28px", minHeight: isMobile ? "calc(100vh - 160px)" : "auto" }}>
           {page === "dashboard" && <Dashboard metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} hideMode={hideMode} combined={combined} inrTotal={inrTotal} usdTotal={usdTotal} isMobile={isMobile} />}
           {page === "positions" && <Positions trades={trades} saveTrades={saveTrades} setEditTrade={setEditTrade} setPyramidTrade={setPyramidTrade} setCloseTrade={setCloseTrade} hideCapital={hideCapital} isMobile={isMobile} metrics={metrics} settings={settings} />}
           {page === "holdings" && <Holdings settings={settings} saveSettings={saveSettings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} />}
@@ -1064,6 +1064,7 @@ function Dashboard({ metrics, settings, trades, hideCapital, hideMode, combined,
 
   // Trade issues — open positions
   const openTrades = trades.filter(t => t.status === "Open");
+  const paperTrades = trades.filter(t => t.status === "Paper");
   const noSL = openTrades.filter(t => !t.stopLoss);
   if (noSL.length > 0) abnormalities.push({ type: "trade", msg: `${noSL.length} open trade${noSL.length > 1 ? "s" : ""} without stop loss`, color: C.red });
   const lowConviction = openTrades.filter(t => t.conviction && +t.conviction < 6);
@@ -1502,6 +1503,57 @@ function AddToPositionModal({ trade, setAddToPosition, trades, saveTrades, setti
   );
 }
 
+function PreTradeChecklistPopup({ trade, onConfirm, onCancel, isPaper }) {
+  const [preTrade, setPreTrade] = useState(PRE_TRADE_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}));
+  const [conviction, setConviction] = useState(trade.conviction || 7);
+  const count = Object.values(preTrade).filter(Boolean).length;
+  const allChecked = count === PRE_TRADE_CHECKLIST.length;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24, maxWidth: 480, width: "100%", maxHeight: "90vh", overflow: "auto" }}>
+        <div style={{ fontSize: 11, letterSpacing: 3, color: isPaper ? C.textD : C.accent, textTransform: "uppercase", marginBottom: 4 }}>{isPaper ? "Paper Trade" : "Pre-Trade Check"}</div>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{trade.stockName || trade.market} · {trade.direction}</div>
+        <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO, marginBottom: 20 }}>Entry {trade.entry} · SL {trade.stopLoss} · {trade.qty} lots</div>
+
+        {!isPaper && (
+          <>
+            <Label style={{ marginBottom: 12 }}>Checklist <span style={{ color: count === PRE_TRADE_CHECKLIST.length ? C.green : C.textD, fontFamily: F_MONO, fontSize: 10 }}>{count}/{PRE_TRADE_CHECKLIST.length}</span></Label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
+              {PRE_TRADE_CHECKLIST.map(c => (
+                <div key={c.key} onClick={() => setPreTrade({ ...preTrade, [c.key]: !preTrade[c.key] })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: preTrade[c.key] ? C.green + "10" : C.surface2, border: `1px solid ${preTrade[c.key] ? C.green + "40" : C.border}`, borderRadius: 6, cursor: "pointer" }}>
+                  <div style={{ width: 16, height: 16, border: `2px solid ${preTrade[c.key] ? C.green : C.borderH}`, background: preTrade[c.key] ? C.green : "transparent", borderRadius: 3, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>{preTrade[c.key] && <span style={{ color: C.bg, fontSize: 10, fontWeight: 700 }}>✓</span>}</div>
+                  <span style={{ fontSize: 13, color: preTrade[c.key] ? C.text : C.textM }}>{c.label}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <Label style={{ marginBottom: 10 }}>Conviction</Label>
+        <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
+          {[1,2,3,4,5,6,7,8,9,10].map(n => (
+            <button key={n} onClick={() => setConviction(n)} style={{ flex: 1, padding: "8px 0", background: conviction >= n ? (n >= 8 ? C.green + "30" : n >= 6 ? C.amber + "20" : C.red + "20") : C.surface2, color: conviction >= n ? (n >= 8 ? C.green : n >= 6 ? C.amber : C.red) : C.textD, border: `1px solid ${conviction >= n ? (n >= 8 ? C.green : n >= 6 ? C.amber : C.red) + "50" : C.border}`, borderRadius: 4, fontSize: 11, fontFamily: F_MONO, cursor: "pointer", fontWeight: 600 }}>{n}</button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: conviction >= 8 ? C.green : conviction >= 6 ? C.amber : C.red, marginBottom: 20 }}>
+          {conviction < 6 && !isPaper ? "⚠ Low conviction — consider skipping. Save as paper trade instead?" : conviction >= 8 ? "High conviction — go ahead" : "Medium conviction — double-check your setup"}
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn variant="ghost" onClick={onCancel} size="lg" style={{ flex: 1 }}>Cancel</Btn>
+          {!isPaper && conviction < 6 && (
+            <Btn onClick={() => onConfirm({ preTrade, conviction, asPaper: true })} size="lg" style={{ flex: 1, color: C.textM, borderColor: C.border }}>Save as Paper</Btn>
+          )}
+          <Btn variant="primary" onClick={() => onConfirm({ preTrade, conviction, asPaper: isPaper })} size="lg" style={{ flex: 2 }} disabled={!isPaper && !allChecked}>
+            {isPaper ? "Save Paper Trade" : allChecked ? "Save Real Trade" : `${count}/${PRE_TRADE_CHECKLIST.length} checked`}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const PARTIAL_REASONS = ["Hit partial target", "Protecting profit", "Reducing size before news", "Trailing stop hit", "Uncertain — just reducing"];
 
 function PartialCloseModal({ trade, setPartialClose, trades, saveTrades, hideCapital }) {
@@ -1618,7 +1670,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>STATUS</span>
-        {["All", "Open", "Closed", "Pending"].map(f => <Btn key={f} variant={filter === f ? "primary" : "ghost"} onClick={() => setFilter(f)} size="sm">{f}</Btn>)}
+        {["All", "Open", "Closed", "Pending", "Paper"].map(f => <Btn key={f} variant={filter === f ? "primary" : "ghost"} onClick={() => setFilter(f)} size="sm" style={f === "Paper" ? { color: filter === f ? C.bg : C.textD, borderColor: C.textD + "40" } : {}}>{f}</Btn>)}
         <div style={{ width: 1, background: C.border, margin: "0 4px", height: 20 }} />
         <span style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>PLATFORM</span>
         {["All", "AB", "Exness"].map(p => <Btn key={p} variant={pf === p ? "primary" : "ghost"} onClick={() => setPf(p)} size="sm">{p}</Btn>)}
@@ -1631,6 +1683,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
   );
 
   const openTrades = trades.filter(t => t.status === "Open");
+  const paperTrades = trades.filter(t => t.status === "Paper");
   const totalLivePnl = openTrades.reduce((a, t) => { const m = calcMetrics(t); return a + (m.livePnl !== null ? (t.platform === "AB" ? m.livePnl : m.livePnl * (settings.fxRate||100)) : 0); }, 0);
   const hasCMP = openTrades.some(t => t.cmp);
 
@@ -1675,7 +1728,8 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
           const isOpen = t.status === "Open";
           const isPending = t.status === "Pending";
           const isClosed = t.status === "Closed";
-          const sColor = isOpen ? C.green : isClosed ? C.textD : C.amber;
+          const isPaper = t.status === 'Paper';
+          const sColor = isOpen ? C.green : isClosed ? C.textD : isPaper ? C.textD : C.amber;
           const displayPnl = isClosed ? m.pnl : m.livePnl;
           const pnlColor = (displayPnl || 0) > 0 ? C.green : (displayPnl || 0) < 0 ? C.red : C.textD;
           const capUsed = +t.marginPerLot > 0 ? +t.qty * +t.marginPerLot : null;
@@ -1695,7 +1749,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
                     <span style={{ fontSize: 11, color: C.textD }}>{t.platform === "AB" ? "AB" : "Exness"}</span>
                     <span style={{ fontSize: 10, color: C.textD }}>·</span>
                     <span style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>{t.date.slice(5)}{isOpen ? ` · ${timeSince(t.date)}` : ""}</span>
-                    {t.setupTag && <span style={{ fontSize: 10, color: t.setupTag === "Mentor Trade" ? C.amber : C.textD, padding: "1px 5px", background: t.setupTag === "Mentor Trade" ? C.amber + "15" : C.surface2, borderRadius: 3 }}>{t.setupTag}</span>}
+                    {isPaper && <span style={{ fontSize: 9, padding: "2px 7px", background: C.textD + "20", color: C.textD, borderRadius: 3, letterSpacing: 1, fontWeight: 600 }}>PAPER</span>}{t.setupTag && <span style={{ fontSize: 10, color: t.setupTag.includes("Mentor") ? C.amber : C.textD, padding: "1px 5px", background: t.setupTag.includes("Mentor") ? C.amber + "15" : C.surface2, borderRadius: 3 }}>{t.setupTag}</span>}
                   </div>
                 </div>
                 <div style={{ textAlign: "right" }}>
@@ -1766,6 +1820,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
               {/* ── ACTIONS ── */}
               <div style={{ padding: "10px 16px", borderTop: `1px solid ${C.border}`, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {isPending && <Btn variant="success" onClick={() => activate(t.id)} size="md" style={{ flex: 1 }}>Activate</Btn>}
+                {isPaper && <Btn onClick={() => saveTrades(trades.map(tr => tr.id === t.id ? { ...tr, status: "Pending", isPaper: false } : tr))} size="md" style={{ flex: 1, color: C.accent, borderColor: C.accent + "50" }}>→ Go Real</Btn>}
                 {isOpen && <Btn variant="danger" onClick={() => setCloseTrade(t)} size="md" style={{ flex: 1, minWidth: 90 }}>Close All</Btn>}
                 {isOpen && +t.qty > 1 && <Btn onClick={() => setPartialClose(t)} size="md" style={{ flex: 1, minWidth: 110, color: C.amber, borderColor: C.amber + "50" }}>Partial Close</Btn>}
                 {isOpen && !t.parentId && <Btn onClick={() => setPyramidTrade(t)} size="md" style={{ flex: 1, minWidth: 90, color: C.textM }}>+ Pyramid</Btn>}
@@ -1796,7 +1851,8 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
           const isOpen = t.status === "Open"; const isClosed = t.status === "Closed"; const isPending = t.status === "Pending";
           const displayPnl = isClosed ? m.pnl : m.livePnl;
           const pnlColor = (displayPnl || 0) > 0 ? C.green : (displayPnl || 0) < 0 ? C.red : C.textD;
-          const sColor = isOpen ? C.green : isClosed ? C.textD : C.amber;
+          const isPaper = t.status === 'Paper';
+          const sColor = isOpen ? C.green : isClosed ? C.textD : isPaper ? C.textD : C.amber;
           return (
             <div key={t.id} style={{ borderBottom: idx < filtered.length - 1 ? `1px solid ${C.border}` : "none" }}>
               {/* ROW 1 — key info */}
@@ -2334,12 +2390,18 @@ function Returns({ trades, settings, hideCapital, isMobile }) {
           <Label>Date Range Report</Label>
           {showReport && <Btn variant="ghost" size="sm" onClick={() => { setShowReport(false); setFromDate(""); setToDate(""); }}>Clear</Btn>}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr auto", gap: 10, marginTop: 10 }}>
-          <div><Label style={{ marginBottom: 5 }}>From</Label><Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} /></div>
-          <div><Label style={{ marginBottom: 5 }}>To</Label><Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} /></div>
-          <div style={{ display: "flex", alignItems: "flex-end" }}>
-            <Btn variant="primary" onClick={() => setShowReport(true)} size="md" disabled={!fromDate && !toDate} style={{ width: isMobile ? "100%" : "auto" }}>Generate Report</Btn>
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+            <div>
+              <Label style={{ marginBottom: 6, fontSize: 10 }}>FROM</Label>
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ width: "100%", boxSizing: "border-box", background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "10px 12px", fontSize: 13, fontFamily: F_MONO, outline: "none", display: "block" }} />
+            </div>
+            <div>
+              <Label style={{ marginBottom: 6, fontSize: 10 }}>TO</Label>
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ width: "100%", boxSizing: "border-box", background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "10px 12px", fontSize: 13, fontFamily: F_MONO, outline: "none", display: "block" }} />
+            </div>
           </div>
+          <Btn variant="primary" onClick={() => setShowReport(true)} size="lg" disabled={!fromDate && !toDate} style={{ width: "100%" }}>Generate Report</Btn>
         </div>
 
         {showReport && reportTrades.length > 0 && (
@@ -2560,14 +2622,40 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
   const partialTarget = calcTarget ? (c.direction === "Long" ? +c.entry + (calcTarget - +c.entry) * 0.6 : +c.entry - (+c.entry - calcTarget) * 0.6) : 0;
 
   const showMultiplier = true; // show for both platforms
+
+  // ── Open risk check ──
+  const openTrades = trades.filter(t => t.status === "Open");
+  const openRiskInr = openTrades.reduce((a, t) => {
+    const m = calcMetrics(t);
+    return a + (t.platform === "AB" ? m.riskAmt : m.riskAmt * (settings.fxRate || 100));
+  }, 0);
+  const openRiskPct = totalCapInr > 0 ? (openRiskInr / totalCapInr) * 100 : 0;
+  const newTotalRiskPct = openRiskPct + actualRiskPct;
+  const maxRiskPct = settings.maxRiskPct || 2.5;
+  const openTradeCount = openTrades.length;
+
+  // ── Today's performance ──
+  const todayStr = today();
+  const todayClosedTrades = trades.filter(t => t.status === "Closed" && (t.exitDate === todayStr || t.date === todayStr));
+  const todayPnlInr = todayClosedTrades.reduce((a, t) => {
+    const m = calcMetrics(t);
+    return a + (t.platform === "AB" ? (m.pnl || 0) : (m.pnl || 0) * (settings.fxRate || 100));
+  }, 0);
+  const todayPnlPct = totalCapInr > 0 ? (todayPnlInr / totalCapInr) * 100 : 0;
+  const dailyLimit = settings.dailyDDLimit || 3;
+  const dailyHeadroom = totalCapInr * (dailyLimit / 100) + Math.min(0, todayPnlInr); // remaining before circuit
+  const sameMarketOpen = openTrades.filter(t => t.market === c.market);
   const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(c.market);
   const isStockFutCalc = c.market === "Stock Futures";
   const grid2 = isMobile ? "1fr" : "1fr 1fr";
 
+  const [showPreTradePopup, setShowPreTradePopup] = useState(false);
+  const [pendingTradeObj, setPendingTradeObj] = useState(null);
+
   const saveAsPending = () => {
     if (!c.entry || !c.sl) { alert("Need entry and stop loss"); return; }
     if (qty <= 0) { alert("Quantity is 0 — check entry, SL, and risk settings"); return; }
-    const newTrade = {
+    const tradeObj = {
       id: "trade_" + Date.now(), date: today(), market: c.market, platform: c.platform,
       direction: c.direction, entry: c.entry, stopLoss: c.sl,
       target: calcTarget > 0 ? calcTarget.toFixed(2) : "",
@@ -2575,11 +2663,36 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
       marginPerLot: c.marginPerLot || "",
       stockName: c.stockName || (isCustom ? c.customMarket : "") || "",
       riskPct: c.riskPct, status: "Pending", setupTag: SETUP_TAGS[0],
-      multiplier: mult,
+      multiplier: mult, conviction: 7,
       checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}),
       pnl: null, exitPrice: null, exitDate: null, mistakeTag: null, exitReason: null,
     };
-    saveTrades([newTrade, ...trades]);
+    setPendingTradeObj(tradeObj);
+    setShowPreTradePopup(true);
+  };
+
+  const saveAsPaper = () => {
+    if (!c.entry || !c.sl) { alert("Need entry and stop loss"); return; }
+    const tradeObj = {
+      id: "trade_" + Date.now(), date: today(), market: c.market, platform: c.platform,
+      direction: c.direction, entry: c.entry, stopLoss: c.sl,
+      target: calcTarget > 0 ? calcTarget.toFixed(2) : "",
+      qty: needsWholeLot ? qty.toString() : qty.toFixed(2),
+      riskPct: c.riskPct, status: "Paper", setupTag: SETUP_TAGS[0],
+      multiplier: mult, conviction: 7, marginPerLot: c.marginPerLot || "",
+      stockName: c.stockName || (isCustom ? c.customMarket : "") || "",
+      checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}),
+      pnl: null, exitPrice: null, exitDate: null, mistakeTag: null, exitReason: null, isPaper: true,
+    };
+    setPendingTradeObj({ ...tradeObj, isPaper: true });
+    setShowPreTradePopup(true);
+  };
+
+  const handlePreTradeConfirm = ({ preTrade, conviction, asPaper }) => {
+    const finalTrade = { ...pendingTradeObj, preTrade, conviction, status: asPaper ? "Paper" : "Pending", isPaper: asPaper };
+    saveTrades([finalTrade, ...trades]);
+    setShowPreTradePopup(false);
+    setPendingTradeObj(null);
     setPage("positions");
   };
 
@@ -2588,6 +2701,31 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
       {recommendedRisk < 1 && (
         <div style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, borderRadius: 6, padding: 12, marginBottom: 14, fontSize: 12, color: C.amber }}>
           ⚠ Drawdown active — recommended risk {recommendedRisk}%
+        </div>
+      )}
+
+      {/* ── OPEN RISK + TODAY STRIP ── */}
+      {(c.entry && c.sl) && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${newTotalRiskPct > maxRiskPct ? C.red + "60" : C.border}`, borderRadius: 7, padding: "10px 14px" }}>
+            <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>OPEN RISK</div>
+            <div style={{ fontSize: 15, fontFamily: F_MONO, fontWeight: 700, color: newTotalRiskPct > maxRiskPct ? C.red : newTotalRiskPct > maxRiskPct * 0.7 ? C.amber : C.green }}>
+              {openRiskPct.toFixed(2)}% + <span style={{ color: actualRiskPct > 0 ? C.accent : C.textD }}>{actualRiskPct.toFixed(2)}%</span>
+            </div>
+            <div style={{ fontSize: 9, color: newTotalRiskPct > maxRiskPct ? C.red : C.textD, marginTop: 2 }}>
+              {newTotalRiskPct > maxRiskPct ? `⚠ ${newTotalRiskPct.toFixed(2)}% — over ${maxRiskPct}% limit` : `= ${newTotalRiskPct.toFixed(2)}% total · limit ${maxRiskPct}%`}
+            </div>
+            {sameMarketOpen.length > 0 && <div style={{ fontSize: 9, color: C.amber, marginTop: 3 }}>⚠ {sameMarketOpen.length} {c.market.replace("MCX ","")} already open</div>}
+          </div>
+          <div style={{ background: C.surface, border: `1px solid ${todayPnlPct < -(dailyLimit * 0.6) ? C.red + "60" : C.border}`, borderRadius: 7, padding: "10px 14px" }}>
+            <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>TODAY</div>
+            <div style={{ fontSize: 15, fontFamily: F_MONO, fontWeight: 700, color: todayPnlInr > 0 ? C.green : todayPnlInr < 0 ? C.red : C.textD }}>
+              {todayPnlInr === 0 ? "—" : dAmt(todayPnlInr, "₹", hideCapital)}
+            </div>
+            <div style={{ fontSize: 9, color: C.textD, marginTop: 2 }}>
+              {todayPnlPct !== 0 ? `${todayPnlPct > 0 ? "+" : ""}${todayPnlPct.toFixed(2)}% · ` : ""}{dAmt(Math.max(0, dailyHeadroom), "₹", hideCapital)} left
+            </div>
+          </div>
         </div>
       )}
 
@@ -2726,53 +2864,71 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
       {/* ── RESULT CARDS ── */}
       {qty > 0 && diff > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 2 }}>
-          {/* Risk row */}
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: 10 }}>
-            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, padding: 14 }}>
-              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Risk Budget</div>
-              <div style={{ fontSize: 18, fontFamily: F_MONO, fontWeight: 600, color: C.textM }}>{dAmt(riskAmt, cur, hideCapital)}</div>
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{c.riskPct}% of total cap</div>
+          {/* Row 1: Capital | Risk */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ background: C.surface, border: `1px solid ${marginPerLot > 0 ? C.amber + "50" : C.border}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>CAPITAL REQUIRED</div>
+              <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: marginPerLot > 0 ? C.amber : C.textM }}>{dAmt(posVal, cur, hideCapital)}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{marginPerLot > 0 ? `${effectiveLeverage}× leverage · ${qty} lots` : "enter margin/lot above"}</div>
             </div>
-            <div style={{ background: C.surface, border: `1px solid ${actualRiskPct > 2 ? C.red : C.border}`, borderRadius: 7, padding: 14 }}>
-              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Actual Risk</div>
-              <div style={{ fontSize: 18, fontFamily: F_MONO, fontWeight: 600, color: actualRiskPct > 2 ? C.red : actualRiskPct > 1 ? C.amber : C.green }}>{dAmt(actualRisk, cur, hideCapital)}</div>
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{actualRiskPct.toFixed(3)}%</div>
-            </div>
-            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, padding: 14 }}>
-              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{marginPerLot > 0 ? "Capital Required" : "Notional Value"}</div>
-              <div style={{ fontSize: 18, fontFamily: F_MONO, fontWeight: 600, color: marginPerLot > 0 ? C.amber : C.textM }}>{dAmt(posVal, cur, hideCapital)}</div>
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{marginPerLot > 0 ? `${effectiveLeverage}× leverage` : "enter margin/lot for real"}</div>
+            <div style={{ background: C.surface, border: `1px solid ${actualRiskPct > 2 ? C.red + "60" : C.border}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>RISK</div>
+              <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: actualRiskPct > 2 ? C.red : actualRiskPct > 1 ? C.amber : C.green }}>{dAmt(actualRisk, cur, hideCapital)}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{actualRiskPct.toFixed(3)}% · budget {dAmt(riskAmt, cur, hideCapital)}</div>
             </div>
           </div>
 
-          {/* Price levels row */}
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, 1fr)", gap: 10 }}>
-            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 7, padding: 14 }}>
-              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Entry</div>
-              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.text }}>{c.entry || "—"}</div>
+          {/* Row 2: R:R | Target Profit */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ background: C.surface, border: `1px solid ${effectiveRR >= 3 ? C.green + "30" : effectiveRR > 0 ? C.red + "30" : C.border}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>R:R</div>
+              <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: effectiveRR >= 3 ? C.green : effectiveRR > 0 ? C.amber : C.textD }}>1:{effectiveRR || "—"}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{targetPrice > 0 ? "from target" : "preset"} · 1R @ {oneRLevel > 0 ? oneRLevel.toFixed(2) : "—"}</div>
             </div>
-            <div style={{ background: C.surface, border: `1px solid ${C.green}30`, borderRadius: 7, padding: 14 }}>
-              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>1R Level</div>
-              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.green }}>{oneRLevel > 0 ? oneRLevel.toFixed(2) : "—"}</div>
-              <div style={{ fontSize: 9, color: C.textD, marginTop: 3 }}>Move SL to entry here</div>
+            <div style={{ background: C.surface, border: `1px solid ${target > 0 ? C.green + "30" : C.border}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>TARGET PROFIT</div>
+              <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: C.green }}>{target > 0 ? dAmt(actualRisk * effectiveRR, cur, hideCapital) : "—"}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>
+                {target > 0 ? `@ ${target.toFixed(2)}` : "enter target"}
+                {partialTarget > 0 && ` · 60%: ${dAmt(actualRisk * effectiveRR * 0.6, cur, hideCapital)}`}
+              </div>
             </div>
-            <div style={{ background: C.surface, border: `1px solid ${C.amber}30`, borderRadius: 7, padding: 14 }}>
-              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Partial Exit (60%)</div>
-              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.amber }}>{partialTarget > 0 ? partialTarget.toFixed(2) : "—"}</div>
-              <div style={{ fontSize: 9, color: C.textD, marginTop: 3 }}>Profit: {dAmt(actualRisk * c.rr * 0.6, cur, hideCapital)}</div>
+          </div>
+
+          {/* Price strip: Entry | 1R | Partial */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            <div style={{ background: C.surface2, borderRadius: 6, padding: "8px 12px" }}>
+              <div style={{ fontSize: 9, color: C.textD, marginBottom: 3 }}>ENTRY</div>
+              <div style={{ fontSize: 14, fontFamily: F_MONO, fontWeight: 600 }}>{c.entry || "—"}</div>
             </div>
-            <div style={{ background: C.surface, border: `1px solid ${C.accent}30`, borderRadius: 7, padding: 14 }}>
-              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Final Target</div>
-              <div style={{ fontSize: 16, fontFamily: F_MONO, fontWeight: 600, color: C.accent }}>{target > 0 ? target.toFixed(2) : "—"}</div>
-              <div style={{ fontSize: 9, color: C.textD, marginTop: 3 }}>Profit: {dAmt(actualRisk * c.rr, cur, hideCapital)}</div>
+            <div style={{ background: C.surface2, borderRadius: 6, padding: "8px 12px" }}>
+              <div style={{ fontSize: 9, color: C.green, marginBottom: 3 }}>1R LEVEL</div>
+              <div style={{ fontSize: 14, fontFamily: F_MONO, fontWeight: 600, color: C.green }}>{oneRLevel > 0 ? oneRLevel.toFixed(2) : "—"}</div>
+            </div>
+            <div style={{ background: C.surface2, borderRadius: 6, padding: "8px 12px" }}>
+              <div style={{ fontSize: 9, color: C.amber, marginBottom: 3 }}>PARTIAL 60%</div>
+              <div style={{ fontSize: 14, fontFamily: F_MONO, fontWeight: 600, color: C.amber }}>{partialTarget > 0 ? partialTarget.toFixed(2) : "—"}</div>
             </div>
           </div>
         </div>
       )}
 
-      <Btn variant="primary" onClick={saveAsPending} size="lg" style={{ marginTop: 16, width: "100%" }} disabled={qty <= 0}>
-        {qty <= 0 && diff > 0 ? "Stop too small for 1 lot" : qty <= 0 ? "Fill entry + SL first" : `Save ${needsWholeLot ? qty : qty.toFixed(2)} lots as Pending Trade`}
-      </Btn>
+      {showPreTradePopup && pendingTradeObj && (
+        <PreTradeChecklistPopup
+          trade={pendingTradeObj}
+          isPaper={pendingTradeObj.isPaper || false}
+          onConfirm={handlePreTradeConfirm}
+          onCancel={() => { setShowPreTradePopup(false); setPendingTradeObj(null); }}
+        />
+      )}
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        <Btn onClick={saveAsPaper} size="lg" style={{ flex: 1, color: C.textD, borderColor: C.border }} disabled={qty <= 0}>
+          📋 Paper
+        </Btn>
+        <Btn variant="primary" onClick={saveAsPending} size="lg" style={{ flex: 3 }} disabled={qty <= 0}>
+          {qty <= 0 && diff > 0 ? "Stop too small" : qty <= 0 ? "Fill entry + SL" : `Save ${needsWholeLot ? qty : qty.toFixed(2)} lots`}
+        </Btn>
+      </div>
     </div>
   );
 }
