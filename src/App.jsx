@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, memo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { LineChart, Line, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 
 // ════════════════ TOKENS ════════════════
@@ -522,11 +522,6 @@ export default function ApexTerminal() {
   }, [metrics.weekDD, metrics.monthDD, loaded]);
 
   // ── Pre-compute all trade metrics once (before any early return) ──
-  const allTradeMetrics = useMemo(() => {
-    const map = {};
-    trades.forEach(t => { map[t.id] = calcMetrics(t); });
-    return map;
-  }, [trades]);
 
   if (!loaded) return <div style={{ background: "#0a0a0a", color: "#525252", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "monospace", fontSize: 13, letterSpacing: 2 }}>NSF</div>;
 
@@ -710,14 +705,14 @@ export default function ApexTerminal() {
         </div>
 
         <div style={{ padding: isMobile ? "16px" : "28px", minHeight: isMobile ? "calc(100vh - 160px)" : "auto" }}>
-          {page === "dashboard" && <DashboardM metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} hideMode={hideMode} combined={combined} inrTotal={inrTotal} usdTotal={usdTotal} isMobile={isMobile} />}
-          {page === "positions" && <PositionsM trades={trades} saveTrades={saveTrades} setEditTrade={setEditTrade} setCloseTrade={setCloseTrade} hideCapital={hideCapital} isMobile={isMobile} metrics={metrics} settings={settings} />}
-          {page === "holdings" && <HoldingsM settings={settings} saveSettings={saveSettings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} />}
-          {page === "addtrade" && <AddTradeM trades={trades} saveTrades={saveTrades} settings={settings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} templates={templates} saveTemplates={saveTemplates} />}
-          {page === "journal" && <JournalM trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} isMobile={isMobile} />}
-          {page === "returns" && <ReturnsM trades={trades} settings={settings} hideCapital={hideCapital} isMobile={isMobile} />}
-          {page === "rules" && <RulesM metrics={metrics} settings={settings} />}
-          {page === "calculator" && <CalculatorM settings={settings} trades={trades} saveTrades={saveTrades} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} />}
+          {page === "dashboard" && <Dashboard metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} hideMode={hideMode} combined={combined} inrTotal={inrTotal} usdTotal={usdTotal} isMobile={isMobile} />}
+          {page === "positions" && <Positions trades={trades} saveTrades={saveTrades} setEditTrade={setEditTrade} setCloseTrade={setCloseTrade} hideCapital={hideCapital} isMobile={isMobile} metrics={metrics} settings={settings} />}
+          {page === "holdings" && <Holdings settings={settings} saveSettings={saveSettings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} />}
+          {page === "addtrade" && <AddTrade trades={trades} saveTrades={saveTrades} settings={settings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} templates={templates} saveTemplates={saveTemplates} />}
+          {page === "journal" && <Journal trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} isMobile={isMobile} />}
+          {page === "returns" && <Returns trades={trades} settings={settings} hideCapital={hideCapital} isMobile={isMobile} />}
+          {page === "rules" && <Rules metrics={metrics} settings={settings} />}
+          {page === "calculator" && <Calculator settings={settings} trades={trades} saveTrades={saveTrades} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} />}
         </div>
       </div>
     </div>
@@ -1224,7 +1219,7 @@ function Dashboard({ metrics, settings, trades, hideCapital, hideMode, combined,
   const mentorTrades = openTrades.filter(t => t.setupTag === "Mentor Trade");
   const noStockName = trades.filter(t => t.market === "Stock Futures" && !t.stockName);
   if (noStockName.length > 0) abnormalities.push({ type: "trade", msg: `${noStockName.length} Stock Futures trade${noStockName.length > 1 ? "s" : ""} missing stock name`, color: C.textD });
-  const badRR = openTrades.filter(t => { const m = allTradeMetrics[t.id] || calcMetrics(t); return m.rr > 0 && m.rr < 2.99; });
+  const badRR = openTrades.filter(t => { const m = calcMetrics(t); return m.rr > 0 && m.rr < 2.99; });
   if (badRR.length > 0) abnormalities.push({ type: "trade", msg: `${badRR.length} open trade${badRR.length > 1 ? "s" : ""} with R:R below 1:3`, color: C.amber });
   const dDLimit = settings.dailyDDLimit || 3;
   const wDLimit = settings.weeklyDDLimit || 6;
@@ -3485,12 +3480,4 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
 }
 
 
-// Memoized page components — only re-render when their own props change
-const DashboardM = memo(Dashboard);
-const PositionsM = memo(Positions);
-const JournalM = memo(Journal);
-const ReturnsM = memo(Returns);
-const RulesM = memo(Rules);
-const CalculatorM = memo(Calculator);
-const HoldingsM = memo(Holdings);
-const AddTradeM = memo(AddTrade);
+
