@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, memo } from "react";
 import { LineChart, Line, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 
 // ════════════════ TOKENS ════════════════
@@ -3486,11 +3486,11 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
 
 
 // Memoized page components — only re-render when their own props change
-const DashboardM = React.memo(Dashboard);
-const PositionsM = React.memo(Positions);
-const JournalM = React.memo(Journal);
-const ReturnsM = React.memo(Returns);
-const RulesM = React.memo(Rules);
-const CalculatorM = React.memo(Calculator);
-const HoldingsM = React.memo(Holdings);
-const AddTradeM = React.memo(AddTrade);
+const DashboardM = memo(Dashboard);
+const PositionsM = memo(Positions);
+const JournalM = memo(Journal);
+const ReturnsM = memo(Returns);
+const RulesM = memo(Rules);
+const CalculatorM = memo(Calculator);
+const HoldingsM = memo(Holdings);
+const AddTradeM = memo(AddTrade);
