@@ -35,7 +35,7 @@ const DEFAULT_SETTINGS = {
   reviewShownDate: null,
   holdings: [],
 };
-const MARKETS_INR = ["Indian Equity", "Stock Futures", "Nifty 50", "BankNifty", "MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium"];
+const MARKETS_INR = ["Stocks", "Stock Futures", "Nifty 50", "BankNifty", "MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium"];
 const MARKETS_USD = [
   "XAU/USD (Gold)", "XAG/USD (Silver)",
   "Oil (WTI/USOIL)", "Natural Gas",
@@ -81,7 +81,7 @@ const CONTRACT_MULTIPLIERS = {
   "MCX Aluminium": 5000,      // 5000 kg lot, quote per 1kg
   "Nifty 50": 65,             // SEBI revised Jan 2026
   "BankNifty": 30,            // SEBI revised Jan 2026
-  "Indian Equity": 1,
+  "Stocks": 1,
   "Stock Futures": 0,         // manual override per stock
 };
 const SETUP_TAGS = ["Mentor G", "Mentor Y", "Mentor J", "Liquidity Sweep", "Other"];
@@ -1646,7 +1646,7 @@ function Positions({ trades, saveTrades, setEditTrade, setPyramidTrade, setClose
   const [mktCat, setMktCat] = useState("All"); // All / Stocks / Commodities / Nifty / Forex
   const [partialClose, setPartialClose] = useState(null);
   const [addToPosition, setAddToPosition] = useState(null);
-  const STOCK_MARKETS = ["Indian Equity", "Stock Futures"];
+  const STOCK_MARKETS = ["Stocks", "Stock Futures"];
   const COMMODITY_MARKETS = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "XAU/USD (Gold)", "XAG/USD (Silver)", "Oil (WTI/USOIL)", "Natural Gas"];
   const NIFTY_MARKETS = ["Nifty 50", "BankNifty"];
   const FOREX_MARKETS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD", "USD/CHF", "USD/CAD", "GBP/JPY", "EUR/JPY", "EUR/GBP"];
@@ -1940,7 +1940,7 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
   const warnRisk = actualRiskPct > 2.5;
   const checklistCount = Object.values(preTrade).filter(Boolean).length;
   const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(t.market);
-  const isStockFut = t.market === "Stock Futures";
+  const isStockFut = t.market === "Stock Futures" || t.market === "Stocks";
   const capRequired = +t.marginPerLot > 0 ? +t.qty * +t.marginPerLot : null;
   const finalTargetAmt = m.rr > 0 && m.riskAmt > 0 ? m.riskAmt * m.rr : null;
   const g2 = isMobile ? "1fr" : "1fr 1fr";
@@ -1993,7 +1993,7 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
                 {t.market === "Nifty 50" && "Lot 65 (SEBI Jan 2026)"}
                 {t.market === "BankNifty" && "Lot 30 (SEBI Jan 2026)"}
                 {isStockFut && "Check NSE for lot size — enter 0 to force you to fill it"}
-                {t.market === "Indian Equity" && "Shares — no multiplier"}
+                {t.market === "Stocks" && "Shares — no multiplier"}
               </div>
             </div>
           )}
@@ -2073,7 +2073,7 @@ function EditTradeModal({ trade, setEditTrade, trades, saveTrades }) {
   const [t, setT] = useState({ ...trade });
   const m = calcMetrics(t);
   const cur = t.platform === "AB" ? "₹" : "$";
-  const isStockFut = t.market === "Stock Futures";
+  const isStockFut = t.market === "Stock Futures" || t.market === "Stocks";
   const save = () => {
     const updated = { ...t };
     if (updated.status === "Closed" && !updated.exitDate) updated.exitDate = today();
@@ -2646,7 +2646,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
   const dailyHeadroom = totalCapInr * (dailyLimit / 100) + Math.min(0, todayPnlInr); // remaining before circuit
   const sameMarketOpen = openTrades.filter(t => t.market === c.market);
   const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(c.market);
-  const isStockFutCalc = c.market === "Stock Futures";
+  const isStockFutCalc = c.market === "Stock Futures" || c.market === "Stocks";
   const grid2 = isMobile ? "1fr" : "1fr 1fr";
 
   const [showPreTradePopup, setShowPreTradePopup] = useState(false);
@@ -2840,7 +2840,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
                 {c.market === "Nifty 50" && "Lot size 65 (SEBI Jan 2026)"}
                 {c.market === "BankNifty" && "Lot size 30 (SEBI Jan 2026)"}
                 {c.market === "Stock Futures" && "Enter stock lot size manually"}
-                {c.market === "Indian Equity" && "Shares — no multiplier needed"}
+                {c.market === "Stocks" && "Equity shares — multiplier is 1"}
               </div>
             </div>
           )}
