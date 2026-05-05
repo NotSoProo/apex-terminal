@@ -226,7 +226,7 @@ const Btn = ({ onClick, children, variant = "default", size = "md", style = {}, 
   return <button onClick={disabled ? undefined : onClick} style={{ borderRadius: 5, cursor: disabled ? "not-allowed" : "pointer", fontFamily: F_UI, fontWeight: 500, opacity: disabled ? 0.4 : 1, transition: "all 0.15s", ...sizes[size], ...variants[variant], ...style }}>{children}</button>;
 };
 
-const INPUT_BASE = { background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "11px 14px", fontSize: 13, fontFamily: F_MONO, outline: "none", width: "100%", boxSizing: "border-box", display: "block", WebkitAppearance: "none", appearance: "none" };
+const INPUT_BASE = { background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "11px 14px", fontSize: 16, fontFamily: F_MONO, outline: "none", width: "100%", boxSizing: "border-box", display: "block", WebkitAppearance: "none", appearance: "none" };
 const Input = ({ value, onChange, placeholder, type = "text", style = {} }) => <input type={type} value={value ?? ""} onChange={onChange} placeholder={placeholder} style={{ ...INPUT_BASE, ...style }} />;
 const Select = ({ value, onChange, options, style = {} }) => <select value={value} onChange={onChange} style={{ ...INPUT_BASE, fontFamily: F_UI, cursor: "pointer", ...style }}>
   {(Array.isArray(options) ? options : []).map(o => typeof o === "string" ? <option key={o} value={o}>{o}</option> : <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -358,6 +358,17 @@ const Eye = ({ open, size = 14 }) => open
   : <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
 
 // ════════════════ MAIN ════════════════
+
+// Memoized page components — only re-render when their own props change
+const DashboardM = React.memo(Dashboard);
+const PositionsM = React.memo(Positions);
+const JournalM = React.memo(Journal);
+const ReturnsM = React.memo(Returns);
+const RulesM = React.memo(Rules);
+const CalculatorM = React.memo(Calculator);
+const HoldingsM = React.memo(Holdings);
+const AddTradeM = React.memo(AddTrade);
+
 export default function ApexTerminal() {
   const [page, setPage] = useState("dashboard");
   const [loaded, setLoaded] = useState(false);
@@ -379,9 +390,16 @@ export default function ApexTerminal() {
 
   useEffect(() => {
     if (document.querySelector("#apex-fonts")) return;
+    // Preconnect first for faster font load
+    const pc = document.createElement("link"); pc.rel = "preconnect"; pc.href = "https://fonts.googleapis.com"; document.head.appendChild(pc);
+    const pc2 = document.createElement("link"); pc2.rel = "preconnect"; pc2.href = "https://fonts.gstatic.com"; pc2.crossOrigin = "anonymous"; document.head.appendChild(pc2);
     const l = document.createElement("link"); l.id = "apex-fonts";
     l.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap";
     l.rel = "stylesheet"; document.head.appendChild(l);
+    // Prevent iOS auto-zoom on input focus
+    const s = document.createElement("style"); s.id = "apex-nozoom";
+    s.textContent = "input,select,textarea{font-size:16px!important;} @media(min-width:768px){input,select,textarea{font-size:13px!important;}} *{-webkit-tap-highlight-color:transparent;}";
+    document.head.appendChild(s);
   }, []);
 
   useEffect(() => {
@@ -424,7 +442,7 @@ export default function ApexTerminal() {
 
   // ════════════════ METRICS ════════════════
   const metrics = useMemo(() => {
-    const closed = trades.filter(t => t.status === "Closed" && !t.isPaper); // exclude paper trades from real metrics
+    const closed = trades.filter(t => t.status === "Closed" && !t.isPaper);
     const open = trades.filter(t => t.status === "Open" && !t.isPaper);
     const t = today(); const ws = weekStart(); const ms = monthStart();
 
@@ -520,7 +538,7 @@ export default function ApexTerminal() {
     return map;
   }, [trades]);
 
-  if (!loaded) return <div style={{ background: C.bg, color: C.textM, height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F_MONO, fontSize: 13 }}>loading...</div>;
+  if (!loaded) return <div style={{ background: "#0a0a0a", color: "#525252", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "monospace", fontSize: 13, letterSpacing: 2 }}>NSF</div>;
 
   const NAV = [
     { id: "dashboard", label: "Dashboard" },
@@ -702,14 +720,14 @@ export default function ApexTerminal() {
         </div>
 
         <div style={{ padding: isMobile ? "16px" : "28px", minHeight: isMobile ? "calc(100vh - 160px)" : "auto" }}>
-          {page === "dashboard" && <Dashboard metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} hideMode={hideMode} combined={combined} inrTotal={inrTotal} usdTotal={usdTotal} isMobile={isMobile} />}
-          {page === "positions" && <Positions trades={trades} saveTrades={saveTrades} setEditTrade={setEditTrade} setCloseTrade={setCloseTrade} hideCapital={hideCapital} isMobile={isMobile} metrics={metrics} settings={settings} />}
-          {page === "holdings" && <Holdings settings={settings} saveSettings={saveSettings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} />}
-          {page === "addtrade" && <AddTrade trades={trades} saveTrades={saveTrades} settings={settings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} templates={templates} saveTemplates={saveTemplates} />}
-          {page === "journal" && <Journal trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} isMobile={isMobile} />}
-          {page === "returns" && <Returns trades={trades} settings={settings} hideCapital={hideCapital} isMobile={isMobile} />}
-          {page === "rules" && <Rules metrics={metrics} settings={settings} />}
-          {page === "calculator" && <Calculator settings={settings} trades={trades} saveTrades={saveTrades} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} />}
+          {page === "dashboard" && <DashboardM metrics={metrics} settings={settings} trades={trades} hideCapital={hideCapital} hideMode={hideMode} combined={combined} inrTotal={inrTotal} usdTotal={usdTotal} isMobile={isMobile} />}
+          {page === "positions" && <PositionsM trades={trades} saveTrades={saveTrades} setEditTrade={setEditTrade} setCloseTrade={setCloseTrade} hideCapital={hideCapital} isMobile={isMobile} metrics={metrics} settings={settings} />}
+          {page === "holdings" && <HoldingsM settings={settings} saveSettings={saveSettings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} />}
+          {page === "addtrade" && <AddTradeM trades={trades} saveTrades={saveTrades} settings={settings} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} templates={templates} saveTemplates={saveTemplates} />}
+          {page === "journal" && <JournalM trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} isMobile={isMobile} />}
+          {page === "returns" && <ReturnsM trades={trades} settings={settings} hideCapital={hideCapital} isMobile={isMobile} />}
+          {page === "rules" && <RulesM metrics={metrics} settings={settings} />}
+          {page === "calculator" && <CalculatorM settings={settings} trades={trades} saveTrades={saveTrades} setPage={setPage} hideCapital={hideCapital} isMobile={isMobile} recommendedRisk={metrics.recommendedRisk} />}
         </div>
       </div>
     </div>
@@ -1216,7 +1234,7 @@ function Dashboard({ metrics, settings, trades, hideCapital, hideMode, combined,
   const mentorTrades = openTrades.filter(t => t.setupTag === "Mentor Trade");
   const noStockName = trades.filter(t => t.market === "Stock Futures" && !t.stockName);
   if (noStockName.length > 0) abnormalities.push({ type: "trade", msg: `${noStockName.length} Stock Futures trade${noStockName.length > 1 ? "s" : ""} missing stock name`, color: C.textD });
-  const badRR = openTrades.filter(t => { const m = calcMetrics(t); return m.rr > 0 && m.rr < 2.99; });
+  const badRR = openTrades.filter(t => { const m = allTradeMetrics[t.id] || calcMetrics(t); return m.rr > 0 && m.rr < 2.99; });
   if (badRR.length > 0) abnormalities.push({ type: "trade", msg: `${badRR.length} open trade${badRR.length > 1 ? "s" : ""} with R:R below 1:3`, color: C.amber });
   const dDLimit = settings.dailyDDLimit || 3;
   const wDLimit = settings.weeklyDDLimit || 6;
