@@ -359,16 +359,6 @@ const Eye = ({ open, size = 14 }) => open
 
 // ════════════════ MAIN ════════════════
 
-// Memoized page components — only re-render when their own props change
-const DashboardM = React.memo(Dashboard);
-const PositionsM = React.memo(Positions);
-const JournalM = React.memo(Journal);
-const ReturnsM = React.memo(Returns);
-const RulesM = React.memo(Rules);
-const CalculatorM = React.memo(Calculator);
-const HoldingsM = React.memo(Holdings);
-const AddTradeM = React.memo(AddTrade);
-
 export default function ApexTerminal() {
   const [page, setPage] = useState("dashboard");
   const [loaded, setLoaded] = useState(false);
@@ -3493,3 +3483,14 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
     </div>
   );
 }
+
+
+// Memoized page components — only re-render when their own props change
+const DashboardM = React.memo(Dashboard);
+const PositionsM = React.memo(Positions);
+const JournalM = React.memo(Journal);
+const ReturnsM = React.memo(Returns);
+const RulesM = React.memo(Rules);
+const CalculatorM = React.memo(Calculator);
+const HoldingsM = React.memo(Holdings);
+const AddTradeM = React.memo(AddTrade);
