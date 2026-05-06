@@ -3096,61 +3096,89 @@ function Rules({ metrics, settings }) {
 }
 
 function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobile, recommendedRisk }) {
-  const [c, setC] = useState({
-    platform: "AB", entry: "", sl: "", target: "", riskPct: recommendedRisk, rr: 3,
-    market: "MCX Gold Mini", direction: "Long",
-    multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"], marginPerLot: "",
-    manualLots: "", stockName: "", customMarket: "",
-    exnessCustomMult: 1,
-  });
-  const [mode, setMode] = useState("auto"); // "auto" = risk%→lots | "manual" = lots→risk%
+  // ── State ──
+  const [platform, setPlatform] = useState("AB");
+  const [tradeType, setTradeType] = useState("futures"); // "futures" | "options" | "stocks"
   const [showPreTradePopup, setShowPreTradePopup] = useState(false);
   const [pendingTradeObj, setPendingTradeObj] = useState(null);
+  const [mode, setMode] = useState("auto");
+  const [c, setC] = useState({
+    entry: "", sl: "", target: "", riskPct: recommendedRisk, rr: 3,
+    market: "MCX Gold Mini", direction: "Long",
+    multiplier: CONTRACT_MULTIPLIERS["MCX Gold Mini"], marginPerLot: "",
+    manualLots: "", stockName: "", customMarket: "", exnessCustomMult: 1,
+    // Options fields
+    optionSubmarket: "Nifty Options", strike: "", optionSide: "CE", expiry: "", isWriter: false,
+  });
 
-  const onMarketChange = (m) => {
-    const exMult = EXNESS_MULTIPLIERS[m];
-    const abMult = CONTRACT_MULTIPLIERS[m];
-    const mult = m === "Stocks" ? 1
-      : c.platform === "Exness" ? (exMult !== undefined ? exMult : 1) : (abMult !== undefined ? abMult : 1);
-    setC({ ...c, market: m, multiplier: mult, stockName: "", customMarket: "" });
+  // ── Market change handlers ──
+  const onTradeTypeChange = (type) => {
+    setTradeType(type);
+    if (type === "options") {
+      setC(prev => ({ ...prev, market: "Nifty Options", multiplier: OPTIONS_MULTIPLIERS["Nifty Options"] || 65, optionSubmarket: "Nifty Options" }));
+    } else if (type === "stocks") {
+      setC(prev => ({ ...prev, market: "Stocks", multiplier: 1 }));
+    } else {
+      const mkt = MARKETS_INR[0];
+      setC(prev => ({ ...prev, market: mkt, multiplier: CONTRACT_MULTIPLIERS[mkt] || 1 }));
+    }
   };
+
+  const onMarketChange = (mkt) => {
+    let mult;
+    if (tradeType === "options") mult = OPTIONS_MULTIPLIERS[mkt] || 0;
+    else if (platform === "Exness") mult = EXNESS_MULTIPLIERS[mkt] !== undefined ? EXNESS_MULTIPLIERS[mkt] : 1;
+    else mult = mkt === "Stocks" ? 1 : (CONTRACT_MULTIPLIERS[mkt] !== undefined ? CONTRACT_MULTIPLIERS[mkt] : 1);
+    setC(prev => ({ ...prev, market: mkt, multiplier: mult, stockName: "", customMarket: "", optionSubmarket: tradeType === "options" ? mkt : prev.optionSubmarket }));
+  };
+
   const onPlatformChange = (p) => {
-    const m = p === "AB" ? MARKETS_INR[0] : MARKETS_USD[0];
-    const mult = m === "Stocks" ? 1
-      : p === "Exness" ? (EXNESS_MULTIPLIERS[m] !== undefined ? EXNESS_MULTIPLIERS[m] : 1)
-      : (CONTRACT_MULTIPLIERS[m] !== undefined ? CONTRACT_MULTIPLIERS[m] : 1);
-    setC({ ...c, platform: p, market: m, multiplier: mult, stockName: "", customMarket: "" });
+    setPlatform(p);
+    if (p === "Exness") {
+      const mkt = MARKETS_USD[0];
+      setC(prev => ({ ...prev, market: mkt, multiplier: EXNESS_MULTIPLIERS[mkt] || 1, stockName: "", customMarket: "" }));
+      setTradeType("futures");
+    } else {
+      const mkt = MARKETS_INR[0];
+      setC(prev => ({ ...prev, market: mkt, multiplier: CONTRACT_MULTIPLIERS[mkt] || 1, stockName: "", customMarket: "" }));
+    }
   };
 
-  const totalCapInr = settings.inrCapital + settings.usdCapital * settings.fxRate;
-  const cur = c.platform === "AB" ? "₹" : "$";
-  const riskAmtInr = (totalCapInr * c.riskPct) / 100;
-  const riskAmt = c.platform === "AB" ? riskAmtInr : riskAmtInr / settings.fxRate;
-
-  // Multiplier: AB uses CONTRACT_MULTIPLIERS, Exness uses EXNESS_MULTIPLIERS
-  const isExness = c.platform === "Exness";
+  // ── Derived values ──
+  const isAB = platform === "AB";
+  const isExness = platform === "Exness";
+  const isOptions = isAB && tradeType === "options";
+  const isStocksType = isAB && tradeType === "stocks";
+  const isStocksCalc = c.market === "Stocks";
+  const isStockFutCalc = c.market === "Stock Futures";
   const isForex = FOREX_PAIRS.includes(c.market);
   const isCustom = c.market === "Custom";
+
+  const totalCapInr = settings.inrCapital + settings.usdCapital * settings.fxRate;
+  const cur = isExness ? "$" : "₹";
+  const riskAmtInr = (totalCapInr * c.riskPct) / 100;
+  const riskAmt = isExness ? riskAmtInr / settings.fxRate : riskAmtInr;
+
   const mult = isExness
     ? (isCustom ? (+c.exnessCustomMult || 1) : (EXNESS_MULTIPLIERS[c.market] || +c.multiplier || 1))
     : (+c.multiplier || 1);
 
   const diff = c.entry && c.sl ? Math.abs(+c.entry - +c.sl) : 0;
 
-  // For forex: diff is in price units (e.g. 0.0050 for 50 pips)
-  // Risk = diff × mult × lots. mult=100000, so 0.005 × 100000 = $500/lot ✓
   const wholeLotMarkets = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty", "Stock Futures"];
-  const needsWholeLot = wholeLotMarkets.includes(c.market);
+  const needsWholeLot = wholeLotMarkets.includes(c.market) || isOptions;
   const roundLot = (n) => (n - Math.floor(n)) >= 0.75 ? Math.ceil(n) : Math.floor(n);
 
-  // AUTO mode: risk% → calculate lots
-  const rawQtyAuto = diff > 0 && mult > 0 ? (riskAmt / (diff * mult)) : 0;
-  const qtyAuto = needsWholeLot ? roundLot(rawQtyAuto) : +rawQtyAuto.toFixed(2);
+  // Options buyer: risk = premium × lots × mult (not diff × lots)
+  const optionPremiumRisk = isOptions && !c.isWriter && c.entry ? +c.entry * 1 * mult : 0;
+  const riskPerLot = isOptions && !c.isWriter ? optionPremiumRisk : (diff * mult);
 
-  // MANUAL mode: lots entered → calculate risk
+  const rawQtyAuto = riskPerLot > 0 ? (riskAmt / riskPerLot) : 0;
+  const qtyAuto = needsWholeLot ? roundLot(rawQtyAuto) : +rawQtyAuto.toFixed(2);
   const qtyManual = +c.manualLots || 0;
   const qty = mode === "auto" ? qtyAuto : qtyManual;
-  const actualRisk = qty * mult * diff;
+
+  const actualRisk = isOptions && !c.isWriter ? qty * (+c.entry || 0) * mult : qty * mult * diff;
   const actualRiskPct = totalCapInr > 0 ? (actualRisk * (isExness ? settings.fxRate : 1)) / totalCapInr * 100 : 0;
 
   const marginPerLot = +c.marginPerLot || 0;
@@ -3158,20 +3186,20 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
   const notionalVal = qty * mult * (+c.entry || 0);
   const effectiveLeverage = marginPerLot > 0 && qty > 0 ? (notionalVal / (qty * marginPerLot)).toFixed(1) : "—";
 
-  // R:R: if target price entered → auto calculate RR. Else use preset rr.
   const targetPrice = c.target ? +c.target : 0;
   const targetDiffFromEntry = targetPrice && c.entry ? Math.abs(targetPrice - +c.entry) : 0;
   const rrFromTarget = diff > 0 && targetDiffFromEntry > 0 ? Math.floor(targetDiffFromEntry / diff) : 0;
   const effectiveRR = targetPrice ? rrFromTarget : c.rr;
-
-  const calcTarget = targetPrice || (diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff * effectiveRR : +c.entry - diff * effectiveRR) : 0); // alias
-  const target = calcTarget; // keep old refs working
+  const calcTarget = targetPrice || (diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff * effectiveRR : +c.entry - diff * effectiveRR) : 0);
+  const target = calcTarget;
   const oneRLevel = diff > 0 && c.entry ? (c.direction === "Long" ? +c.entry + diff : +c.entry - diff) : 0;
   const partialTarget = calcTarget ? (c.direction === "Long" ? +c.entry + (calcTarget - +c.entry) * 0.6 : +c.entry - (+c.entry - calcTarget) * 0.6) : 0;
 
-  const showMultiplier = true; // show for both platforms
+  const multLocked = ["MCX Gold Mini","MCX Silver Mini","MCX Crude Oil","MCX Natural Gas","MCX Copper","MCX Aluminium","Nifty 50","BankNifty"].includes(c.market);
+  const showMultiplier = isAB && !isStocksCalc && !isOptions;
+  const grid2 = isMobile ? "1fr" : "1fr 1fr";
 
-  // ── Open risk check ──
+  // ── Open risk + today ──
   const openTrades = trades.filter(t => t.status === "Open");
   const openRiskInr = openTrades.reduce((a, t) => {
     const m = calcMetrics(t);
@@ -3180,57 +3208,45 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
   const openRiskPct = totalCapInr > 0 ? (openRiskInr / totalCapInr) * 100 : 0;
   const newTotalRiskPct = openRiskPct + actualRiskPct;
   const maxRiskPct = settings.maxRiskPct || 2.5;
-  const openTradeCount = openTrades.length;
-
-  // ── Today's performance ──
   const todayStr = today();
   const todayClosedTrades = trades.filter(t => t.status === "Closed" && (t.exitDate === todayStr || t.date === todayStr));
-  const todayPnlInr = todayClosedTrades.reduce((a, t) => {
-    const m = calcMetrics(t);
-    return a + (t.platform === "AB" ? (m.pnl || 0) : (m.pnl || 0) * (settings.fxRate || 100));
-  }, 0);
-  const todayPnlPct = totalCapInr > 0 ? (todayPnlInr / totalCapInr) * 100 : 0;
+  const todayPnlInr = todayClosedTrades.reduce((a, t) => { const m = calcMetrics(t); return a + (t.platform === "AB" ? (m.pnl || 0) : (m.pnl || 0) * (settings.fxRate || 100)); }, 0);
   const dailyLimit = settings.dailyDDLimit || 3;
-  const dailyHeadroom = totalCapInr * (dailyLimit / 100) + Math.min(0, todayPnlInr); // remaining before circuit
+  const dailyHeadroom = totalCapInr * (dailyLimit / 100) + Math.min(0, todayPnlInr);
   const sameMarketOpen = openTrades.filter(t => t.market === c.market);
-  const multLocked = ["MCX Gold Mini", "MCX Silver Mini", "MCX Crude Oil", "MCX Natural Gas", "MCX Copper", "MCX Aluminium", "Nifty 50", "BankNifty"].includes(c.market);
-  const isStockFutCalc = c.market === "Stock Futures" || c.market === "Stocks";
-  const isStocksCalc = c.market === "Stocks";
-  const grid2 = isMobile ? "1fr" : "1fr 1fr";
+  const todayPnlPct = totalCapInr > 0 ? (todayPnlInr / totalCapInr) * 100 : 0;
+
+  // ── Save handlers ──
+  const buildTradeObj = (asPaper) => ({
+    id: "trade_" + Date.now(), date: today(),
+    market: isOptions ? `${c.optionSubmarket.replace(" Options","")} ${c.strike} ${c.optionSide}` : c.market,
+    platform: platform, direction: c.direction,
+    entry: c.entry, stopLoss: c.sl,
+    target: calcTarget > 0 ? calcTarget.toFixed(2) : "",
+    qty: needsWholeLot ? qty.toString() : qty.toFixed(2),
+    marginPerLot: c.marginPerLot || "",
+    stockName: c.stockName || (isCustom ? c.customMarket : "") || "",
+    riskPct: c.riskPct, multiplier: mult, conviction: 7,
+    status: asPaper ? "Paper" : "Pending",
+    isPaper: asPaper, isOption: isOptions,
+    optionSubmarket: isOptions ? c.optionSubmarket : undefined,
+    setupTag: SETUP_TAGS[0],
+    checklist: RULES_CHECKLIST.reduce((a, ch) => ({ ...a, [ch.key]: false }), {}),
+    pnl: null, exitPrice: null, exitDate: null, mistakeTag: null, exitReason: null,
+  });
 
   const saveAsPending = () => {
     if (!c.entry || !c.sl) { alert("Need entry and stop loss"); return; }
     if (qty <= 0) { alert("Quantity is 0 — check entry, SL, and risk settings"); return; }
-    const tradeObj = {
-      id: "trade_" + Date.now(), date: today(), market: c.market, platform: c.platform,
-      direction: c.direction, entry: c.entry, stopLoss: c.sl,
-      target: calcTarget > 0 ? calcTarget.toFixed(2) : "",
-      qty: needsWholeLot ? qty.toString() : qty.toFixed(2),
-      marginPerLot: c.marginPerLot || "",
-      stockName: c.stockName || (isCustom ? c.customMarket : "") || "",
-      riskPct: c.riskPct, status: "Pending", setupTag: SETUP_TAGS[0],
-      multiplier: mult, conviction: 7,
-      checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}),
-      pnl: null, exitPrice: null, exitDate: null, mistakeTag: null, exitReason: null,
-    };
-    setPendingTradeObj(tradeObj);
+    const obj = buildTradeObj(false);
+    setPendingTradeObj(obj);
     setShowPreTradePopup(true);
   };
 
   const saveAsPaper = () => {
     if (!c.entry || !c.sl) { alert("Need entry and stop loss"); return; }
-    const tradeObj = {
-      id: "trade_" + Date.now(), date: today(), market: c.market, platform: c.platform,
-      direction: c.direction, entry: c.entry, stopLoss: c.sl,
-      target: calcTarget > 0 ? calcTarget.toFixed(2) : "",
-      qty: needsWholeLot ? qty.toString() : qty.toFixed(2),
-      riskPct: c.riskPct, status: "Paper", setupTag: SETUP_TAGS[0],
-      multiplier: mult, conviction: 7, marginPerLot: c.marginPerLot || "",
-      stockName: c.stockName || (isCustom ? c.customMarket : "") || "",
-      checklist: RULES_CHECKLIST.reduce((a, c) => ({ ...a, [c.key]: false }), {}),
-      pnl: null, exitPrice: null, exitDate: null, mistakeTag: null, exitReason: null, isPaper: true,
-    };
-    setPendingTradeObj({ ...tradeObj, isPaper: true });
+    const obj = buildTradeObj(true);
+    setPendingTradeObj(obj);
     setShowPreTradePopup(true);
   };
 
@@ -3242,88 +3258,126 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
     setPage("positions");
   };
 
+  const optionMarketName = isOptions && c.strike && c.optionSide
+    ? `${c.optionSubmarket.replace(" Options","")} ${c.strike} ${c.optionSide}`
+    : (c.optionSubmarket || "Nifty Options");
+
   return (
     <div style={{ maxWidth: 720 }}>
+      {showPreTradePopup && pendingTradeObj && (
+        <PreTradeChecklistPopup
+          trade={pendingTradeObj} isPaper={pendingTradeObj.isPaper || false}
+          onConfirm={handlePreTradeConfirm}
+          onCancel={() => { setShowPreTradePopup(false); setPendingTradeObj(null); }}
+        />
+      )}
       {recommendedRisk < 1 && (
         <div style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, borderRadius: 6, padding: 12, marginBottom: 14, fontSize: 12, color: C.amber }}>
           ⚠ Drawdown active — recommended risk {recommendedRisk}%
         </div>
       )}
 
-      {/* ── OPEN RISK + TODAY STRIP ── */}
-      {(c.entry && c.sl) && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <div style={{ background: C.surface, border: `1px solid ${newTotalRiskPct > maxRiskPct ? C.red + "60" : C.border}`, borderRadius: 7, padding: "10px 14px" }}>
-            <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>OPEN RISK</div>
-            <div style={{ fontSize: 15, fontFamily: F_MONO, fontWeight: 700, color: newTotalRiskPct > maxRiskPct ? C.red : newTotalRiskPct > maxRiskPct * 0.7 ? C.amber : C.green }}>
-              {openRiskPct.toFixed(2)}% + <span style={{ color: actualRiskPct > 0 ? C.accent : C.textD }}>{actualRiskPct.toFixed(2)}%</span>
-            </div>
-            <div style={{ fontSize: 9, color: newTotalRiskPct > maxRiskPct ? C.red : C.textD, marginTop: 2 }}>
-              {newTotalRiskPct > maxRiskPct ? `⚠ ${newTotalRiskPct.toFixed(2)}% — over ${maxRiskPct}% limit` : `= ${newTotalRiskPct.toFixed(2)}% total · limit ${maxRiskPct}%`}
-            </div>
-            {sameMarketOpen.length > 0 && <div style={{ fontSize: 9, color: C.amber, marginTop: 3 }}>⚠ {sameMarketOpen.length} {c.market.replace("MCX ","")} already open</div>}
-          </div>
-          <div style={{ background: C.surface, border: `1px solid ${todayPnlPct < -(dailyLimit * 0.6) ? C.red + "60" : C.border}`, borderRadius: 7, padding: "10px 14px" }}>
-            <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>TODAY</div>
-            <div style={{ fontSize: 15, fontFamily: F_MONO, fontWeight: 700, color: todayPnlInr > 0 ? C.green : todayPnlInr < 0 ? C.red : C.textD }}>
-              {todayPnlInr === 0 ? "—" : dAmt(todayPnlInr, "₹", hideCapital)}
-            </div>
-            <div style={{ fontSize: 9, color: C.textD, marginTop: 2 }}>
-              {todayPnlPct !== 0 ? `${todayPnlPct > 0 ? "+" : ""}${todayPnlPct.toFixed(2)}% · ` : ""}{dAmt(Math.max(0, dailyHeadroom), "₹", hideCapital)} left
-            </div>
+      {/* ── STEP 1: PLATFORM ── */}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16, marginBottom: 10 }}>
+        <Label style={{ marginBottom: 10 }}>Platform</Label>
+        <div style={{ display: "flex", gap: 8 }}>
+          {[["AB", "Aditya Birla"], ["Exness", "Exness"]].map(([val, label]) => (
+            <button key={val} onClick={() => onPlatformChange(val)} style={{ flex: 1, padding: "12px 0", background: platform === val ? C.accent : C.surface2, color: platform === val ? C.bg : C.textM, border: `1px solid ${platform === val ? C.accent : C.border}`, borderRadius: 6, fontSize: 14, fontWeight: 700, fontFamily: F_UI, cursor: "pointer" }}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── STEP 2: TRADE TYPE (AB only) ── */}
+      {isAB && (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16, marginBottom: 10 }}>
+          <Label style={{ marginBottom: 10 }}>Trade Type</Label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["futures","Futures"],["options","Options"],["stocks","Stocks"]].map(([val, label]) => (
+              <button key={val} onClick={() => onTradeTypeChange(val)} style={{ flex: 1, padding: "10px 0", background: tradeType === val ? C.accent + "20" : C.surface2, color: tradeType === val ? C.accent : C.textM, border: `1.5px solid ${tradeType === val ? C.accent : C.border}`, borderRadius: 6, fontSize: 13, fontWeight: tradeType === val ? 700 : 400, fontFamily: F_UI, cursor: "pointer" }}>{label}</button>
+            ))}
           </div>
         </div>
       )}
 
-      {/* ── PRIMARY RESULT — lots shown BIG ── */}
-      {qty > 0 && diff > 0 && (
-        <div style={{ background: C.surface, border: `2px solid ${C.accent}40`, borderRadius: 10, padding: "20px 24px", marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
-          <div>
-            <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>{mode === "auto" ? "Calculated Lots" : "Manual Lots"}</div>
-            <div style={{ fontSize: 48, fontWeight: 800, color: C.accent, fontFamily: F_MONO, lineHeight: 1 }}>{needsWholeLot ? qty : qty.toFixed(2)}</div>
-            {mode === "auto" && needsWholeLot && rawQtyAuto > 0 && rawQtyAuto !== qty && (
-              <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO, marginTop: 4 }}>Exact: {rawQtyAuto.toFixed(3)} → rounded</div>
-            )}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>ACTUAL RISK</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: actualRiskPct > 2 ? C.red : actualRiskPct > 1 ? C.amber : C.green, fontFamily: F_MONO }}>{dAmt(actualRisk, cur, hideCapital)}</div>
-              <div style={{ fontSize: 11, color: C.textM, fontFamily: F_MONO }}>{actualRiskPct.toFixed(3)}% of total</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── INPUTS ── */}
+      {/* ── STEP 3: INPUTS ── */}
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 18, marginBottom: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <Label>Position Size Calculator</Label>
           <div style={{ fontSize: 10, color: C.textD }}>Risk on {dAmt(totalCapInr, "₹", hideCapital)} total</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: grid2, gap: 12 }}>
-          <div><Label style={{ marginBottom: 6 }}>Platform</Label><Select value={c.platform} onChange={e => onPlatformChange(e.target.value)} options={[{ value: "AB", label: "Aditya Birla (₹)" }, { value: "Exness", label: "Exness ($)" }]} /></div>
-          <div><Label style={{ marginBottom: 6 }}>Market</Label><Select value={c.market} onChange={e => onMarketChange(e.target.value)} options={c.platform === "AB" ? MARKETS_INR : MARKETS_USD} /></div>
-          {isStockFutCalc && (
+          {/* Market */}
+          <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
+            <Label style={{ marginBottom: 6 }}>Market</Label>
+            <Select value={c.market} onChange={e => onMarketChange(e.target.value)} options={
+              isExness ? MARKETS_USD :
+              isOptions ? [...OPTIONS_NSE, ...OPTIONS_MCX] :
+              isStocksType ? ["Stocks"] :
+              MARKETS_INR
+            } />
+          </div>
+
+          {/* Stock name for Stocks / Stock Futures / Options on equities */}
+          {(isStocksCalc || isStockFutCalc || (isOptions && (c.optionSubmarket === "Stock Options"))) && (
             <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
-              <Label style={{ marginBottom: 6 }}>Stock Name <span style={{ color: C.red, fontSize: 9 }}>required</span></Label>
-              <Input value={c.stockName || ""} onChange={e => setC({ ...c, stockName: e.target.value })} placeholder="e.g. HDFC Bank, Reliance" />
+              <Label style={{ marginBottom: 6 }}>Stock Name</Label>
+              <Input value={c.stockName || ""} onChange={e => setC({ ...c, stockName: e.target.value })} placeholder="e.g. Reliance, HDFC Bank" />
             </div>
           )}
-          <div><Label style={{ marginBottom: 6 }}>Direction</Label><Select value={c.direction} onChange={e => setC({ ...c, direction: e.target.value })} options={["Long", "Short"]} /></div>
+
+          {/* Exness custom market */}
           {isCustom && isExness && (
             <div>
               <Label style={{ marginBottom: 6 }}>Instrument Name</Label>
-              <Input value={c.customMarket || ""} onChange={e => setC({ ...c, customMarket: e.target.value })} placeholder="e.g. XNGUSD, US30, DE40" />
+              <Input value={c.customMarket || ""} onChange={e => setC({ ...c, customMarket: e.target.value })} placeholder="e.g. US30, DE40" />
             </div>
           )}
           {isCustom && isExness && (
             <div>
-              <Label style={{ marginBottom: 6 }}>Contract Size (per lot)</Label>
-              <Input type="number" value={c.exnessCustomMult || ""} onChange={e => setC({ ...c, exnessCustomMult: +e.target.value || 1 })} placeholder="e.g. 100 for indices" />
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Check Exness instrument specs for lot size</div>
+              <Label style={{ marginBottom: 6 }}>Contract Size</Label>
+              <Input type="number" value={c.exnessCustomMult || ""} onChange={e => setC({ ...c, exnessCustomMult: +e.target.value || 1 })} placeholder="e.g. 100" />
             </div>
           )}
+
+          {/* Options-specific fields */}
+          {isOptions && <>
+            <div>
+              <Label style={{ marginBottom: 6 }}>Strike Price</Label>
+              <Input type="number" value={c.strike || ""} onChange={e => setC({ ...c, strike: e.target.value })} placeholder="e.g. 24000" />
+            </div>
+            <div>
+              <Label style={{ marginBottom: 6 }}>Option Type</Label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {["CE","PE"].map(side => (
+                  <button key={side} onClick={() => setC({ ...c, optionSide: side })} style={{ flex: 1, padding: "11px 0", background: c.optionSide === side ? (side==="CE" ? C.green+"20" : C.red+"20") : C.surface2, color: c.optionSide === side ? (side==="CE" ? C.green : C.red) : C.textD, border: `1.5px solid ${c.optionSide === side ? (side==="CE" ? C.green : C.red) : C.border}`, borderRadius: 6, fontSize: 14, fontWeight: 700, fontFamily: F_MONO, cursor: "pointer" }}>{side}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label style={{ marginBottom: 6 }}>Expiry Date</Label>
+              <Input type="date" value={c.expiry || ""} onChange={e => setC({ ...c, expiry: e.target.value })} />
+            </div>
+            <div>
+              <Label style={{ marginBottom: 6 }}>Action</Label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["false","Buy"],["true","Write"]].map(([val, label]) => (
+                  <button key={val} onClick={() => setC({ ...c, isWriter: val === "true", direction: val === "true" ? "Short" : "Long" })} style={{ flex: 1, padding: "10px 0", background: String(c.isWriter) === val ? C.amber+"20" : C.surface2, color: String(c.isWriter) === val ? C.amber : C.textD, border: `1.5px solid ${String(c.isWriter) === val ? C.amber : C.border}`, borderRadius: 6, fontSize: 12, fontWeight: 600, fontFamily: F_UI, cursor: "pointer" }}>{label}</button>
+                ))}
+              </div>
+            </div>
+          </>}
+
+          {/* Direction */}
+          <div>
+            <Label style={{ marginBottom: 6 }}>Direction</Label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["Long","Short"].map(d => (
+                <button key={d} onClick={() => setC({ ...c, direction: d })} style={{ flex: 1, padding: "11px 0", background: c.direction === d ? (d==="Long" ? C.green+"20" : C.red+"20") : C.surface2, color: c.direction === d ? (d==="Long" ? C.green : C.red) : C.textD, border: `1.5px solid ${c.direction === d ? (d==="Long" ? C.green : C.red) : C.border}`, borderRadius: 6, fontSize: 13, fontWeight: 700, fontFamily: F_UI, cursor: "pointer" }}>{d}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Risk % */}
           <div>
             <Label style={{ marginBottom: 6 }}>Risk %</Label>
             <div style={{ display: "flex", gap: 3 }}>
@@ -3332,106 +3386,140 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
               ))}
             </div>
           </div>
-          <div><Label style={{ marginBottom: 6 }}>Entry Price</Label><Input type="number" value={c.entry} onChange={e => setC({ ...c, entry: e.target.value })} placeholder="0.00" /></div>
-          <div><Label style={{ marginBottom: 6 }}>Stop Loss</Label><Input type="number" value={c.sl} onChange={e => setC({ ...c, sl: e.target.value })} placeholder="0.00" /></div>
+
+          {/* Entry + SL */}
           <div>
-            <Label style={{ marginBottom: 6 }}>Target Price <span style={{ color: C.textD, fontSize: 9 }}>optional — auto-calculates R:R</span></Label>
-            <Input type="number" value={c.target || ""} onChange={e => setC({ ...c, target: e.target.value })} placeholder="Enter target to auto R:R" />
-            {targetPrice > 0 && diff > 0 && <div style={{ fontSize: 11, color: C.accent, marginTop: 4, fontFamily: F_MONO }}>R:R = 1:{rrFromTarget} (from your target)</div>}
+            <Label style={{ marginBottom: 6 }}>{isOptions ? "Premium (per unit)" : "Entry Price"}</Label>
+            <Input type="number" value={c.entry} onChange={e => setC({ ...c, entry: e.target.value })} placeholder="0.00" />
+            {isOptions && !c.isWriter && <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>Max loss = premium × lots × {mult}</div>}
+          </div>
+          {!isOptions || !c.isWriter ? (
+            <div>
+              <Label style={{ marginBottom: 6 }}>{isOptions ? "Exit Premium (target)" : "Stop Loss"}</Label>
+              <Input type="number" value={c.sl} onChange={e => setC({ ...c, sl: e.target.value })} placeholder="0.00" />
+            </div>
+          ) : <div />}
+
+          {/* Target price */}
+          <div>
+            <Label style={{ marginBottom: 6 }}>Target <span style={{ fontSize: 9, color: C.textD }}>optional · auto R:R</span></Label>
+            <Input type="number" value={c.target || ""} onChange={e => setC({ ...c, target: e.target.value })} placeholder="Enter to auto-calc R:R" />
+            {targetPrice > 0 && diff > 0 && <div style={{ fontSize: 11, color: C.accent, marginTop: 4, fontFamily: F_MONO }}>R:R = 1:{rrFromTarget}</div>}
           </div>
 
-          {/* MODE TOGGLE + MANUAL LOTS */}
+          {/* Lots toggle */}
           <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <Label>{isStocksCalc ? "Shares" : "Lots"}</Label>
               <div style={{ display: "flex", gap: 0, border: `1px solid ${C.border}`, borderRadius: 5, overflow: "hidden" }}>
-                <button onClick={() => setMode("auto")} style={{ padding: "5px 14px", background: mode === "auto" ? C.accent : C.surface2, color: mode === "auto" ? C.bg : C.textM, border: "none", fontSize: 11, fontFamily: F_UI, cursor: "pointer", fontWeight: mode === "auto" ? 600 : 400 }}>Auto calculate</button>
-                <button onClick={() => setMode("manual")} style={{ padding: "5px 14px", background: mode === "manual" ? C.accent : C.surface2, color: mode === "manual" ? C.bg : C.textM, border: "none", fontSize: 11, fontFamily: F_UI, cursor: "pointer", fontWeight: mode === "manual" ? 600 : 400 }}>Enter manually</button>
+                <button onClick={() => setMode("auto")} style={{ padding: "5px 14px", background: mode === "auto" ? C.accent : C.surface2, color: mode === "auto" ? C.bg : C.textM, border: "none", fontSize: 11, fontFamily: F_UI, cursor: "pointer", fontWeight: mode === "auto" ? 600 : 400 }}>Auto</button>
+                <button onClick={() => setMode("manual")} style={{ padding: "5px 14px", background: mode === "manual" ? C.accent : C.surface2, color: mode === "manual" ? C.bg : C.textM, border: "none", fontSize: 11, fontFamily: F_UI, cursor: "pointer", fontWeight: mode === "manual" ? 600 : 400 }}>Manual</button>
               </div>
             </div>
             {mode === "manual" ? (
-              <div>
-                <Input type="number" value={c.manualLots} onChange={e => setC({ ...c, manualLots: e.target.value })} placeholder={`e.g. 4 lots`} />
-                <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Enter your lot count — see the resulting risk below</div>
-              </div>
+              <Input type="number" value={c.manualLots} onChange={e => setC({ ...c, manualLots: e.target.value })} placeholder={`e.g. ${needsWholeLot ? "4" : "0.5"} lots`} />
             ) : (
               <div style={{ background: C.surface2, borderRadius: 5, padding: "10px 12px", fontSize: 12, color: C.textM }}>
-                Auto-calculated from your risk% and stop distance.
-                {qty > 0 ? <span style={{ color: C.accent, fontWeight: 600, marginLeft: 6 }}>{needsWholeLot ? qty : qty.toFixed(2)} lots</span> : <span style={{ color: C.textD, marginLeft: 6 }}>Fill entry + SL to calculate</span>}
+                Auto-calculated from risk% and stop.
+                {qty > 0 ? <span style={{ color: C.accent, fontWeight: 600, marginLeft: 6 }}>{needsWholeLot ? qty : qty.toFixed(2)} {isStocksCalc ? "shares" : "lots"}</span> : <span style={{ color: C.textD, marginLeft: 6 }}>Fill entry + SL</span>}
               </div>
             )}
           </div>
 
-          {/* MARGIN PER LOT */}
-          {c.platform === "AB" && needsWholeLot && !isStocksCalc && (
+          {/* Margin per lot (futures only) */}
+          {!isStocksCalc && !isOptions && !isExness && (
             <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
-              <Label style={{ marginBottom: 6 }}>Margin per Lot (₹) <span style={{ color: C.textD, fontSize: 9 }}>optional</span></Label>
-              <Input type="number" value={c.marginPerLot || ""} onChange={e => setC({ ...c, marginPerLot: e.target.value })} placeholder="e.g. 55000 — ask your broker" />
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Real capital blocked per lot. Without this, position value shows notional (misleading for futures).</div>
+              <Label style={{ marginBottom: 6 }}>Margin per Lot <span style={{ color: C.textD, fontSize: 9 }}>optional</span></Label>
+              <Input type="number" value={c.marginPerLot || ""} onChange={e => setC({ ...c, marginPerLot: e.target.value })} placeholder="e.g. 55000" />
             </div>
           )}
 
-          {/* CONTRACT MULTIPLIER */}
-          {showMultiplier && !isStocksCalc && (
+          {/* Contract multiplier */}
+          {showMultiplier && (
             <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
               <Label style={{ marginBottom: 6 }}>Contract Multiplier {multLocked && <span style={{ color: C.textD, fontSize: 9, marginLeft: 6 }}>auto-set</span>}</Label>
               <Input type="number" value={c.multiplier} onChange={e => setC({ ...c, multiplier: +e.target.value || 1 })} style={{ opacity: multLocked ? 0.7 : 1 }} />
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>
-                {c.market === "MCX Gold Mini" && "100g lot · price per 10g"}
-                {c.market === "MCX Silver Mini" && "5kg lot · price per 1kg"}
-                {c.market === "MCX Crude Oil" && "100 barrels · price per barrel"}
-                {c.market === "MCX Natural Gas" && "1250 mmBtu · price per mmBtu"}
-                {c.market === "MCX Copper" && "2500kg · price per kg"}
-                {c.market === "MCX Aluminium" && "5000kg · price per kg"}
-                {c.market === "Nifty 50" && "Lot size 65 (SEBI Jan 2026)"}
-                {c.market === "BankNifty" && "Lot size 30 (SEBI Jan 2026)"}
-                {c.market === "Stock Futures" && "Enter stock lot size manually"}
-                {c.market === "Stocks" && "Equity shares — multiplier is 1"}
-              </div>
             </div>
           )}
 
-          {/* TARGET R:R */}
+          {/* R:R presets */}
           <div style={{ gridColumn: isMobile ? "auto" : "span 2" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
               <Label>Target R:R</Label>
-              {targetPrice > 0 ? <span style={{ fontSize: 11, color: C.accent, fontFamily: F_MONO }}>Auto: 1:{rrFromTarget}</span> : <span style={{ fontSize: 10, color: C.textD }}>or enter target price above</span>}
+              {targetPrice > 0 ? <span style={{ fontSize: 11, color: C.accent, fontFamily: F_MONO }}>Auto: 1:{rrFromTarget}</span> : <span style={{ fontSize: 10, color: C.textD }}>or enter target above</span>}
             </div>
             <div style={{ display: "flex", gap: 3, opacity: targetPrice > 0 ? 0.4 : 1 }}>
-              {[3, 4, 5, 7, 10, 15].map(r => (
-                <button key={r} onClick={() => { if (!targetPrice) setC({ ...c, rr: r }); }} style={{ flex: 1, padding: "9px 0", background: effectiveRR === r ? C.accent : C.surface2, color: effectiveRR === r ? C.bg : C.textM, border: `1px solid ${effectiveRR === r ? C.accent : C.border}`, borderRadius: 4, fontSize: 11, fontFamily: F_MONO, cursor: targetPrice > 0 ? "default" : "pointer", fontWeight: 600 }}>1:{r}</button>
+              {[3,4,5,7,10,15].map(r => (
+                <button key={r} onClick={() => { if (!targetPrice) setC({ ...c, rr: r }); }} style={{ flex: 1, padding: "9px 0", background: effectiveRR === r ? C.accent : C.surface2, color: effectiveRR === r ? C.bg : C.textM, border: `1px solid ${effectiveRR === r ? C.accent : C.border}`, borderRadius: 4, fontSize: 11, fontFamily: F_MONO, cursor: "pointer", fontWeight: 600 }}>1:{r}</button>
               ))}
             </div>
-            {targetPrice > 0 && <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>Clear target price to use preset R:R</div>}
           </div>
         </div>
       </div>
 
+      {/* ── OPEN RISK + TODAY ── */}
+      {(c.entry && c.sl) && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${newTotalRiskPct > maxRiskPct ? C.red+"60" : C.border}`, borderRadius: 7, padding: "10px 14px" }}>
+            <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>OPEN RISK</div>
+            <div style={{ fontSize: 15, fontFamily: F_MONO, fontWeight: 700, color: newTotalRiskPct > maxRiskPct ? C.red : newTotalRiskPct > maxRiskPct*0.7 ? C.amber : C.green }}>
+              {openRiskPct.toFixed(2)}% + <span style={{ color: actualRiskPct > 0 ? C.accent : C.textD }}>{actualRiskPct.toFixed(2)}%</span>
+            </div>
+            <div style={{ fontSize: 9, color: newTotalRiskPct > maxRiskPct ? C.red : C.textD, marginTop: 2 }}>
+              {newTotalRiskPct > maxRiskPct ? `⚠ ${newTotalRiskPct.toFixed(2)}% — over ${maxRiskPct}%` : `= ${newTotalRiskPct.toFixed(2)}% total`}
+            </div>
+            {sameMarketOpen.length > 0 && <div style={{ fontSize: 9, color: C.amber, marginTop: 2 }}>⚠ {sameMarketOpen.length} {c.market.replace("MCX ","")} already open</div>}
+          </div>
+          <div style={{ background: C.surface, border: `1px solid ${todayPnlPct < -(dailyLimit*0.6) ? C.red+"60" : C.border}`, borderRadius: 7, padding: "10px 14px" }}>
+            <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 4 }}>TODAY</div>
+            <div style={{ fontSize: 15, fontFamily: F_MONO, fontWeight: 700, color: todayPnlInr > 0 ? C.green : todayPnlInr < 0 ? C.red : C.textD }}>
+              {todayPnlInr === 0 ? "—" : dAmt(todayPnlInr, "₹", hideCapital)}
+            </div>
+            <div style={{ fontSize: 9, color: C.textD, marginTop: 2 }}>{dAmt(Math.max(0, dailyHeadroom), "₹", hideCapital)} left</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PRIMARY LOT RESULT ── */}
+      {qty > 0 && diff > 0 && (
+        <div style={{ background: C.surface, border: `2px solid ${C.accent}40`, borderRadius: 10, padding: "20px 24px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 6 }}>{mode === "auto" ? "Calculated" : "Manual"} {isStocksCalc ? "Shares" : "Lots"}</div>
+            <div style={{ fontSize: 48, fontWeight: 800, color: C.accent, fontFamily: F_MONO, lineHeight: 1 }}>{needsWholeLot ? qty : qty.toFixed(2)}</div>
+            {mode === "auto" && needsWholeLot && rawQtyAuto > 0 && rawQtyAuto !== qty && (
+              <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO, marginTop: 4 }}>Exact: {rawQtyAuto.toFixed(3)} → rounded</div>
+            )}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>ACTUAL RISK</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: actualRiskPct > 2 ? C.red : actualRiskPct > 1 ? C.amber : C.green, fontFamily: F_MONO }}>{dAmt(actualRisk, cur, hideCapital)}</div>
+            <div style={{ fontSize: 11, color: C.textM, fontFamily: F_MONO }}>{actualRiskPct.toFixed(3)}%</div>
+          </div>
+        </div>
+      )}
+
       {/* ── RESULT CARDS ── */}
       {qty > 0 && diff > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 2 }}>
-          {/* Row 1: Capital | Risk */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div style={{ background: C.surface, border: `1px solid ${marginPerLot > 0 ? C.amber + "50" : C.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ background: C.surface, border: `1px solid ${marginPerLot > 0 ? C.amber+"50" : C.border}`, borderRadius: 8, padding: 16 }}>
               <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>CAPITAL REQUIRED</div>
               <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: marginPerLot > 0 ? C.amber : C.textM }}>{dAmt(posVal, cur, hideCapital)}</div>
               <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{marginPerLot > 0 ? `${effectiveLeverage}× leverage · ${qty} lots` : "enter margin/lot above"}</div>
             </div>
-            <div style={{ background: C.surface, border: `1px solid ${actualRiskPct > 2 ? C.red + "60" : C.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ background: C.surface, border: `1px solid ${actualRiskPct > 2 ? C.red+"60" : C.border}`, borderRadius: 8, padding: 16 }}>
               <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>RISK</div>
               <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: actualRiskPct > 2 ? C.red : actualRiskPct > 1 ? C.amber : C.green }}>{dAmt(actualRisk, cur, hideCapital)}</div>
               <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{actualRiskPct.toFixed(3)}% · budget {dAmt(riskAmt, cur, hideCapital)}</div>
             </div>
           </div>
-
-          {/* Row 2: R:R | Target Profit */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div style={{ background: C.surface, border: `1px solid ${effectiveRR >= 3 ? C.green + "30" : effectiveRR > 0 ? C.red + "30" : C.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ background: C.surface, border: `1px solid ${effectiveRR >= 3 ? C.green+"30" : effectiveRR > 0 ? C.red+"30" : C.border}`, borderRadius: 8, padding: 16 }}>
               <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>R:R</div>
               <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: effectiveRR >= 3 ? C.green : effectiveRR > 0 ? C.amber : C.textD }}>1:{effectiveRR || "—"}</div>
               <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{targetPrice > 0 ? "from target" : "preset"} · 1R @ {oneRLevel > 0 ? oneRLevel.toFixed(2) : "—"}</div>
             </div>
-            <div style={{ background: C.surface, border: `1px solid ${target > 0 ? C.green + "30" : C.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ background: C.surface, border: `1px solid ${target > 0 ? C.green+"30" : C.border}`, borderRadius: 8, padding: 16 }}>
               <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>TARGET PROFIT</div>
               <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: C.green }}>{target > 0 ? dAmt(actualRisk * effectiveRR, cur, hideCapital) : "—"}</div>
               <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>
@@ -3440,9 +3528,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
               </div>
             </div>
           </div>
-
-          {/* Price strip: Entry | 1R | Partial */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
             <div style={{ background: C.surface2, borderRadius: 6, padding: "8px 12px" }}>
               <div style={{ fontSize: 9, color: C.textD, marginBottom: 3 }}>ENTRY</div>
               <div style={{ fontSize: 14, fontFamily: F_MONO, fontWeight: 600 }}>{c.entry || "—"}</div>
@@ -3459,25 +3545,14 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
         </div>
       )}
 
-      {showPreTradePopup && pendingTradeObj && (
-        <PreTradeChecklistPopup
-          trade={pendingTradeObj}
-          isPaper={pendingTradeObj.isPaper || false}
-          onConfirm={handlePreTradeConfirm}
-          onCancel={() => { setShowPreTradePopup(false); setPendingTradeObj(null); }}
-        />
-      )}
       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <Btn onClick={saveAsPaper} size="lg" style={{ flex: 1, color: C.textD, borderColor: C.border }} disabled={qty <= 0}>
-          📋 Paper
-        </Btn>
+        <Btn onClick={saveAsPaper} size="lg" style={{ flex: 1, color: C.textD, borderColor: C.border }} disabled={qty <= 0}>📋 Paper</Btn>
         <Btn variant="primary" onClick={saveAsPending} size="lg" style={{ flex: 3 }} disabled={qty <= 0}>
-          {qty <= 0 && diff > 0 ? "Stop too small" : qty <= 0 ? "Fill entry + SL" : `Save ${needsWholeLot ? qty : qty.toFixed(2)} lots`}
+          {qty <= 0 && diff > 0 ? "Stop too small" : qty <= 0 ? "Fill entry + SL" : `Save ${needsWholeLot ? qty : qty.toFixed(2)} ${isStocksCalc ? "shares" : "lots"}`}
         </Btn>
       </div>
     </div>
   );
 }
 
-
-
+// Memoized page components — only re-render when their own props change
