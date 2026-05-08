@@ -1870,33 +1870,9 @@ function Positions({ trades, saveTrades, setEditTrade, setCloseTrade, hideCapita
     setBatchCMP({});
   };
 
-  const CMPBatch = () => openTradesForCMP.length > 0 ? (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>UPDATE ALL CMP</div>
-        <Btn variant="primary" onClick={applyBatchCMP} size="sm" disabled={Object.keys(batchCMP).length === 0}>Apply {Object.keys(batchCMP).length > 0 ? `(${Object.keys(batchCMP).length})` : ""}</Btn>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {openTradesForCMP.map(t => {
-          const m = calcMetrics(t); const cur = t.platform === "AB" ? "₹" : "$";
-          const val = batchCMP[t.id] !== undefined ? batchCMP[t.id] : (t.cmp || "");
-          const liveR = val && t.entry && t.stopLoss ? +(((t.direction === "Long" ? +val - +t.entry : +t.entry - +val) / Math.abs(+t.entry - +t.stopLoss)).toFixed(1)) : null;
-          return (
-            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: C.text, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.stockName || t.market.replace("MCX ","")}</div>
-                <div style={{ fontSize: 10, color: C.textD, fontFamily: F_MONO }}>Entry {t.entry} · SL {t.currentSL || t.stopLoss}</div>
-              </div>
-              <Input type="number" value={val} onChange={e => setBatchCMP({ ...batchCMP, [t.id]: e.target.value })} placeholder={t.cmp || "CMP"} style={{ width: 110, fontSize: 13 }} />
-              {liveR !== null && <span style={{ fontSize: 11, fontFamily: F_MONO, fontWeight: 700, color: liveR >= 0 ? C.green : C.red, width: 36, textAlign: "right", flexShrink: 0 }}>{liveR >= 0 ? "+" : ""}{liveR}R</span>}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  ) : null;
 
-  if (filtered.length === 0) return <div><SummaryBar /><CMPBatch /><FilterBar /><div style={{ padding: 40, textAlign: "center", color: C.textD, fontSize: 13 }}>No trades match these filters</div></div>;
+
+  if (filtered.length === 0) return <div><SummaryBar /><FilterBar /><div style={{ padding: 40, textAlign: "center", color: C.textD, fontSize: 13 }}>No trades match these filters</div></div>;
 
   // MOBILE card layout
   if (isMobile) return (
@@ -1904,7 +1880,6 @@ function Positions({ trades, saveTrades, setEditTrade, setCloseTrade, hideCapita
       {partialClose && <PartialCloseModal trade={partialClose} setPartialClose={setPartialClose} trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} />}
       {addToPosition && <AddToPositionModal trade={addToPosition} setAddToPosition={setAddToPosition} trades={trades} saveTrades={saveTrades} settings={settings} />}
       <SummaryBar />
-      <CMPBatch />
       <FilterBar />
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {filtered.map(t => {
@@ -2039,7 +2014,6 @@ function Positions({ trades, saveTrades, setEditTrade, setCloseTrade, hideCapita
       {partialClose && <PartialCloseModal trade={partialClose} setPartialClose={setPartialClose} trades={trades} saveTrades={saveTrades} hideCapital={hideCapital} />}
       {addToPosition && <AddToPositionModal trade={addToPosition} setAddToPosition={setAddToPosition} trades={trades} saveTrades={saveTrades} settings={settings} />}
       <SummaryBar />
-      <CMPBatch />
       <FilterBar />
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
         {filtered.length === 0 ? (
@@ -2102,6 +2076,34 @@ function Positions({ trades, saveTrades, setEditTrade, setCloseTrade, hideCapita
           );
         })}
       </div>
+
+      {/* ── CMP BATCH UPDATE (bottom) ── */}
+      {openTradesForCMP.length > 0 && (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginTop: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>UPDATE ALL CMP</div>
+            <Btn variant="primary" onClick={applyBatchCMP} size="sm" disabled={Object.keys(batchCMP).length === 0}>Apply {Object.keys(batchCMP).length > 0 ? `(${Object.keys(batchCMP).length})` : ""}</Btn>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {openTradesForCMP.map(t => {
+              const sl = t.currentSL || t.stopLoss;
+              const val = batchCMP[t.id] !== undefined ? batchCMP[t.id] : (t.cmp || "");
+              const liveR = val && t.entry && sl ? +(((t.direction === "Long" ? +val - +t.entry : +t.entry - +val) / Math.abs(+t.entry - +sl)).toFixed(1)) : null;
+              return (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, color: C.text, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.stockName || t.market.replace("MCX ","")}</div>
+                    <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>Entry {t.entry} · SL {sl}</div>
+                  </div>
+                  <input type="number" value={val} onChange={e => { const v = e.target.value; setBatchCMP(prev => ({ ...prev, [t.id]: v })); }} placeholder={t.cmp || "CMP"} style={{ background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 6, padding: "10px 12px", fontSize: 16, fontFamily: F_MONO, outline: "none", width: 110, boxSizing: "border-box" }} />
+                  {liveR !== null && <span style={{ fontSize: 12, fontFamily: F_MONO, fontWeight: 700, color: liveR >= 0 ? C.green : C.red, width: 38, textAlign: "right", flexShrink: 0 }}>{liveR >= 0 ? "+" : ""}{liveR}R</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ height: 40 }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -2466,6 +2468,15 @@ function AddTrade({ trades, saveTrades, settings, setPage, hideCapital, isMobile
             <>
               <div style={{ fontSize: 20, color: C.amber, fontFamily: F_MONO, fontWeight: 700 }}>{t.entry && t.qty ? dAmt(+t.entry * +t.qty * (+t.multiplier||1), cur, hideCapital) : "—"}</div>
               <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>{t.isWriter ? "margin blocked" : "premium paid"}</div>
+            </>
+          ) : isExness ? (
+            <>
+              <div style={{ fontSize: 20, color: riskInr > 0 ? C.accent : C.textD, fontFamily: F_MONO, fontWeight: 700 }}>{riskInr > 0 ? dAmt(calcMetrics({...t, stopLoss: t.stopLoss, multiplier: t.multiplier}).riskAmt, cur, hideCapital) : "—"}</div>
+              <div style={{ fontSize: 10, color: C.textD, marginTop: 3 }}>capital = risk (unlimited leverage)</div>
+              {finalTargetAmt && <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: C.textD }}>Target</span>
+                <span style={{ fontSize: 14, color: C.accent, fontFamily: F_MONO, fontWeight: 600 }}>{dAmt(finalTargetAmt, cur, hideCapital)}</span>
+              </div>}
             </>
           ) : (
             <>
@@ -3502,10 +3513,19 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
       {qty > 0 && diff > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 2 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <div style={{ background: C.surface, border: `1px solid ${marginPerLot > 0 ? C.amber+"50" : C.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ background: C.surface, border: `1px solid ${isExness ? C.accent+"30" : marginPerLot > 0 ? C.amber+"50" : C.border}`, borderRadius: 8, padding: 16 }}>
               <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>CAPITAL REQUIRED</div>
-              <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: marginPerLot > 0 ? C.amber : C.textM }}>{dAmt(posVal, cur, hideCapital)}</div>
-              <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{marginPerLot > 0 ? `${effectiveLeverage}× leverage · ${qty} lots` : "enter margin/lot above"}</div>
+              {isExness ? (
+                <>
+                  <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: C.accent }}>{dAmt(actualRisk, cur, hideCapital)}</div>
+                  <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>capital = risk · unlimited leverage</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 22, fontFamily: F_MONO, fontWeight: 700, color: marginPerLot > 0 ? C.amber : C.textM }}>{dAmt(posVal, cur, hideCapital)}</div>
+                  <div style={{ fontSize: 10, color: C.textD, marginTop: 4 }}>{marginPerLot > 0 ? `${effectiveLeverage}× leverage · ${qty} lots` : "enter margin/lot above"}</div>
+                </>
+              )}
             </div>
             <div style={{ background: C.surface, border: `1px solid ${actualRiskPct > 2 ? C.red+"60" : C.border}`, borderRadius: 8, padding: 16 }}>
               <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 6 }}>RISK</div>
