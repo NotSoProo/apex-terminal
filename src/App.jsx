@@ -3106,7 +3106,456 @@ function Rules({ metrics, settings }) {
   );
 }
 
+function OptionsCalculator({ settings, hideCapital, isMobile }) {
+  const INSTRUMENTS = {
+    "Nifty 50":    { lotSize: 65,  unit: "pts",   label: "Nifty 50",    priceLabel: "Index pts" },
+    "BankNifty":   { lotSize: 15,  unit: "pts",   label: "Bank Nifty",  priceLabel: "Index pts" },
+    "MCX Gold":    { lotSize: 100, unit: "₹/10g", label: "MCX Gold",    priceLabel: "₹ per 10g" },
+    "MCX Silver":  { lotSize: 30,  unit: "₹/kg",  label: "MCX Silver",  priceLabel: "₹ per kg"  },
+    "MCX Crude":   { lotSize: 100, unit: "₹/bbl", label: "MCX Crude",   priceLabel: "₹ per bbl" },
+  };
+  const STRATEGIES = [
+    { id: "naked",   label: "Naked Buy",          legs: 1, desc: "Buy 1 CE or PE. Simple directional." },
+    { id: "bcs",     label: "Bull Call Spread",   legs: 2, desc: "Buy lower CE + sell higher CE." },
+    { id: "bps",     label: "Bear Put Spread",    legs: 2, desc: "Buy higher PE + sell lower PE." },
+    { id: "bwb",     label: "Broken Wing Butterfly", legs: 3, desc: "Buy + sell 2x at target + buy protection." },
+    { id: "ratio",   label: "Ratio Spread",       legs: 2, desc: "Buy 1 + sell 2 higher strike." },
+  ];
+
+  const [tab, setTab] = useState("setup");
+  const [inst, setInst] = useState("Nifty 50");
+  const [dir, setDir] = useState("Bullish");
+  const [entry, setEntry] = useState("23500");
+  const [sl, setSl] = useState("23255");
+  const [target, setTarget] = useState("24600");
+  const [strategy, setStrategy] = useState("bcs");
+  const [daysHold, setDaysHold] = useState(14);
+  const [maxLoss, setMaxLoss] = useState("200000");
+  const [prems, setPrems] = useState({ leg1: "640", leg2: "145", leg3: "30" });
+  const [strikes, setStrikes] = useState({ leg1: "23500", leg2: "24500", leg3: "25000" });
+  const [sliderPrice, setSliderPrice] = useState(23500);
+
+  const info = INSTRUMENTS[inst];
+  const entryN = +entry || 0, slN = +sl || 0, targetN = +target || 0;
+  const slDist = Math.abs(entryN - slN);
+  const targetDist = Math.abs(targetN - entryN);
+  const rrPts = slDist > 0 ? (targetDist / slDist).toFixed(1) : "—";
+  const isCall = dir === "Bullish";
+
+  // Delta estimator
+  const getDelta = (optionStrike, underlying) => {
+    const dist = Math.abs(optionStrike - underlying);
+    if (dist < 200) return 0.50;
+    if (dist < 500) return 0.32;
+    if (dist < 1000) return 0.17;
+    return 0.07;
+  };
+
+  // P&L for a price level
+  const calcPnlAtPrice = (price, expiry = false) => {
+    const p1 = +prems.leg1 || 0, p2 = +prems.leg2 || 0, p3 = +prems.leg3 || 0;
+    const s1 = +strikes.leg1 || entryN, s2 = +strikes.leg2 || (entryN + 1000), s3 = +strikes.leg3 || (entryN + 1500);
+    const d1 = getDelta(s1, price), d2 = getDelta(s2, price);
+    const slDistMove = Math.abs(price - entryN);
+
+    if (strategy === "naked") {
+      if (expiry) return isCall ? Math.max(0, price - s1) - p1 : Math.max(0, s1 - price) - p1;
+      return isCall ? d1 * (price - entryN) * 0.85 - (p1 * 0.08) : d1 * (entryN - price) * 0.85 - (p1 * 0.08);
+    }
+    if (strategy === "bcs") {
+      const longPnl = expiry ? Math.max(0, price - s1) - p1 : d1 * (price - entryN) * 0.85;
+      const shortPnl = expiry ? p2 - Math.max(0, price - s2) : p2 - (d2 * (price - entryN) * 0.5 + (p2 * 0.05));
+      return longPnl + shortPnl;
+    }
+    if (strategy === "bps") {
+      const longPnl = expiry ? Math.max(0, s1 - price) - p1 : d1 * (entryN - price) * 0.85;
+      const shortPnl = expiry ? p2 - Math.max(0, s2 - price) : p2 - (d2 * (entryN - price) * 0.5 + (p2 * 0.05));
+      return longPnl + shortPnl;
+    }
+    if (strategy === "ratio") {
+      const longPnl = expiry ? Math.max(0, price - s1) - p1 : d1 * (price - entryN) * 0.85;
+      const shortPnl = expiry ? 2 * (p2 - Math.max(0, price - s2)) : 2 * (p2 - d2 * (price - entryN) * 0.5);
+      return longPnl + shortPnl;
+    }
+    if (strategy === "bwb") {
+      const longPnl = expiry ? Math.max(0, price - s1) - p1 : d1 * (price - entryN) * 0.85;
+      const shortPnl = expiry ? 2 * (p2 - Math.max(0, price - s2)) : 2 * (p2 - d2 * (price - entryN) * 0.5);
+      const protPnl = expiry ? Math.max(0, price - s3) - p3 : getDelta(s3, price) * (price - entryN) * 0.6;
+      return longPnl + shortPnl + protPnl;
+    }
+    return 0;
+  };
+
+  // Net cost per unit
+  const netCost = (() => {
+    const p1 = +prems.leg1 || 0, p2 = +prems.leg2 || 0, p3 = +prems.leg3 || 0;
+    if (strategy === "naked") return p1;
+    if (strategy === "bcs" || strategy === "bps") return p1 - p2;
+    if (strategy === "ratio") return p1 - 2 * p2;
+    if (strategy === "bwb") return p1 + p3 - 2 * p2;
+    return p1;
+  })();
+
+  const capitalPerLot = netCost * info.lotSize;
+  const maxLossN = +maxLoss || 0;
+
+  // Lot sizing
+  const slPnlPerUnit = Math.abs(calcPnlAtPrice(slN, false));
+  const slPnlPerLot = slPnlPerUnit * info.lotSize;
+  const lotsRec = slPnlPerLot > 0 ? Math.floor(maxLossN / slPnlPerLot) : 0;
+  const totalCapital = lotsRec * capitalPerLot;
+  const actualSLLoss = lotsRec * slPnlPerLot;
+  const targetProfitTotal = lotsRec * Math.abs(calcPnlAtPrice(targetN, false)) * info.lotSize;
+
+  // P&L table levels
+  const levels = [
+    { label: "Stop Loss", price: slN },
+    { label: "Entry", price: entryN },
+    { label: "25% to Target", price: entryN + (targetN - entryN) * 0.25 },
+    { label: "50% to Target", price: entryN + (targetN - entryN) * 0.5 },
+    { label: "75% to Target", price: entryN + (targetN - entryN) * 0.75 },
+    { label: "Target", price: targetN },
+    { label: "+20% Beyond", price: entryN + (targetN - entryN) * 1.2 },
+  ];
+
+  // Theta burn
+  const daysToExpiry = 30;
+  const thetaPerDay = ((netCost * 0.6) / daysToExpiry).toFixed(1);
+  const daysTo30pct = netCost > 0 ? Math.floor((netCost * 0.3) / (+thetaPerDay || 1)) : 0;
+  const capitalEff = capitalPerLot > 0 ? ((Math.abs(calcPnlAtPrice(targetN, false)) * info.lotSize) / capitalPerLot * 100).toFixed(0) : 0;
+
+  // Warnings
+  const warnings = [];
+  const s2 = +strikes.leg2;
+  if ((strategy === "bcs" || strategy === "ratio") && s2 > 0 && s2 < targetN) warnings.push({ type: "red", msg: `⚠ Sold strike ${s2} is below your target ${targetN}. Gains capped at ₹${((s2 - entryN) * info.lotSize).toLocaleString("en-IN")} per lot.` });
+  if (slDist > 0 && netCost > 0 && slDist < netCost) warnings.push({ type: "amber", msg: `⚠ SL distance (${slDist} pts) is less than your net premium (${netCost}). SL may be too tight.` });
+  if (+rrPts > 0 && +rrPts < 2) warnings.push({ type: "amber", msg: `⚠ R:R is only 1:${rrPts}. Consider adjusting target or strategy.` });
+  if (daysHold > 21) warnings.push({ type: "amber", msg: `⚠ Holding ${daysHold} days — theta decay accelerates in last 21 days before expiry.` });
+
+  const fmtInr = (n) => {
+    const abs = Math.abs(n);
+    const formatted = abs >= 100000 ? `₹${(abs/100000).toFixed(1)}L` : abs >= 1000 ? `₹${(abs/1000).toFixed(1)}K` : `₹${abs.toFixed(0)}`;
+    return n < 0 ? `-${formatted}` : formatted;
+  };
+
+  const pnlColor = (n) => n > 0 ? C.green : n < 0 ? C.red : C.textD;
+  const numLegs = { naked: 1, bcs: 2, bps: 2, ratio: 2, bwb: 3 };
+  const legLabels = { naked: ["Buy CE/PE"], bcs: ["Buy CE (lower)", "Sell CE (higher)"], bps: ["Buy PE (higher)", "Sell PE (lower)"], ratio: ["Buy CE", "Sell 2× CE (higher)"], bwb: ["Buy CE", "Sell 2× CE (target)", "Buy CE (protection)"] };
+
+  const TABS = [
+    { id: "setup", label: "Setup" },
+    { id: "strategy", label: "Strategy" },
+    { id: "sizing", label: "Sizing" },
+    { id: "pnl", label: "P&L" },
+    { id: "whatif", label: "What-if" },
+  ];
+
+  return (
+    <div style={{ maxWidth: 720, paddingBottom: 80 }}>
+      {/* Tab navigation */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: "8px 14px", background: tab === t.id ? C.accent : C.surface, color: tab === t.id ? C.bg : C.textM, border: `1px solid ${tab === t.id ? C.accent : C.border}`, borderRadius: 20, fontSize: 12, fontFamily: F_UI, cursor: "pointer", fontWeight: tab === t.id ? 700 : 400, whiteSpace: "nowrap", flexShrink: 0 }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* Warnings */}
+      {warnings.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+          {warnings.map((w, i) => (
+            <div key={i} style={{ background: w.type === "red" ? C.red+"15" : C.amber+"15", border: `1px solid ${w.type === "red" ? C.red+"60" : C.amber+"60"}`, borderRadius: 6, padding: "10px 14px", fontSize: 12, color: w.type === "red" ? C.red : C.amber }}>{w.msg}</div>
+          ))}
+        </div>
+      )}
+
+      {/* ── SETUP TAB ── */}
+      {tab === "setup" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+            <Label style={{ marginBottom: 10 }}>Instrument</Label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Object.keys(INSTRUMENTS).map(k => (
+                <button key={k} onClick={() => setInst(k)} style={{ padding: "9px 14px", background: inst === k ? C.accent : C.surface2, color: inst === k ? C.bg : C.textM, border: `1px solid ${inst === k ? C.accent : C.border}`, borderRadius: 6, fontSize: 12, fontFamily: F_UI, cursor: "pointer", fontWeight: inst === k ? 700 : 400 }}>{INSTRUMENTS[k].label}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              {["Bullish","Bearish"].map(d => (
+                <button key={d} onClick={() => setDir(d)} style={{ flex: 1, padding: "11px 0", background: dir === d ? (d==="Bullish" ? C.green+"20" : C.red+"20") : C.surface2, color: dir === d ? (d==="Bullish" ? C.green : C.red) : C.textD, border: `1.5px solid ${dir === d ? (d==="Bullish" ? C.green : C.red) : C.border}`, borderRadius: 6, fontSize: 13, fontWeight: 700, fontFamily: F_UI, cursor: "pointer" }}>{d}</button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+            <Label style={{ marginBottom: 12 }}>Trade Parameters ({info.priceLabel})</Label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              {[["Entry", entry, setEntry], ["Stop Loss", sl, setSl], ["Target", target, setTarget]].map(([label, val, setter]) => (
+                <div key={label}>
+                  <Label style={{ marginBottom: 5, fontSize: 10 }}>{label}</Label>
+                  <Input type="number" value={val} onChange={e => setter(e.target.value)} placeholder="0" />
+                </div>
+              ))}
+            </div>
+            {entryN > 0 && slN > 0 && targetN > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 12 }}>
+                {[
+                  { label: "SL Distance", value: `${slDist} pts` },
+                  { label: "Target Dist", value: `${targetDist} pts` },
+                  { label: "R:R", value: `1:${rrPts}`, color: +rrPts >= 3 ? C.green : C.amber },
+                ].map(s => (
+                  <div key={s.label} style={{ background: C.surface2, borderRadius: 6, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 9, color: C.textD }}>{s.label}</div>
+                    <div style={{ fontSize: 14, color: s.color || C.text, fontFamily: F_MONO, fontWeight: 700, marginTop: 2 }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <Label>Days to Hold</Label>
+              <span style={{ fontSize: 16, color: C.accent, fontFamily: F_MONO, fontWeight: 700 }}>{daysHold}d</span>
+            </div>
+            <input type="range" min="1" max="45" value={daysHold} onChange={e => setDaysHold(+e.target.value)} style={{ width: "100%", accentColor: C.accent }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.textD, marginTop: 4 }}>
+              <span>1d</span><span style={{ color: C.amber }}>21d (theta risk)</span><span>45d</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Btn variant="primary" onClick={() => setTab("strategy")} size="lg" style={{ minWidth: 140 }}>Next: Strategy →</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* ── STRATEGY TAB ── */}
+      {tab === "strategy" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+            <Label style={{ marginBottom: 12 }}>Choose Strategy</Label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {STRATEGIES.map(s => (
+                <button key={s.id} onClick={() => setStrategy(s.id)} style={{ background: strategy === s.id ? C.accent+"15" : C.surface2, border: `1.5px solid ${strategy === s.id ? C.accent : C.border}`, borderRadius: 7, padding: "12px 14px", cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: strategy === s.id ? C.accent : C.text, fontWeight: strategy === s.id ? 700 : 500 }}>{s.label}</div>
+                    <div style={{ fontSize: 11, color: C.textD, marginTop: 2 }}>{s.desc}</div>
+                  </div>
+                  <div style={{ fontSize: 10, color: C.textD, fontFamily: F_MONO, textAlign: "right", minWidth: 60 }}>{s.legs} leg{s.legs > 1 ? "s" : ""}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+            <Label style={{ marginBottom: 12 }}>Enter Premiums</Label>
+            {(legLabels[strategy] || []).map((leg, i) => {
+              const key = `leg${i+1}`;
+              return (
+                <div key={key} style={{ marginBottom: 12 }}>
+                  <Label style={{ marginBottom: 6, fontSize: 10 }}>{leg}</Label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <Label style={{ marginBottom: 4, fontSize: 9 }}>Strike</Label>
+                      <Input type="number" value={strikes[key]} onChange={e => setStrikes(prev => ({ ...prev, [key]: e.target.value }))} placeholder="Strike" />
+                    </div>
+                    <div>
+                      <Label style={{ marginBottom: 4, fontSize: 9 }}>Premium ₹</Label>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => setPrems(prev => ({ ...prev, [key]: String(Math.max(0, (+prev[key]||0) - 5) ) }))} style={{ padding: "11px 12px", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, color: C.textM, cursor: "pointer", fontSize: 14, lineHeight: 1 }}>−</button>
+                        <Input type="number" value={prems[key]} onChange={e => setPrems(prev => ({ ...prev, [key]: e.target.value }))} placeholder="₹" style={{ textAlign: "center" }} />
+                        <button onClick={() => setPrems(prev => ({ ...prev, [key]: String((+prev[key]||0) + 5) }))} style={{ padding: "11px 12px", background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, color: C.textM, cursor: "pointer", fontSize: 14, lineHeight: 1 }}>+</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {netCost > 0 && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+              <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 10 }}>STRATEGY SUMMARY</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { label: "Net Cost / Unit", value: `₹${netCost}` },
+                  { label: "Per Lot", value: fmtInr(capitalPerLot) },
+                  { label: "Theta / Day", value: `₹${thetaPerDay}/unit`, color: C.red },
+                  { label: "Days before 30% lost", value: `${daysTo30pct}d`, color: daysTo30pct < daysHold ? C.amber : C.green },
+                  { label: "Capital Efficiency", value: `${capitalEff}%`, color: +capitalEff >= 50 ? C.green : C.textM },
+                  { label: "Margin saving (basket)", value: "~40-60%", color: C.green },
+                ].map(s => (
+                  <div key={s.label} style={{ background: C.surface2, borderRadius: 6, padding: "10px 12px" }}>
+                    <div style={{ fontSize: 9, color: C.textD }}>{s.label}</div>
+                    <div style={{ fontSize: 14, color: s.color || C.text, fontFamily: F_MONO, fontWeight: 700, marginTop: 3 }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Btn variant="primary" onClick={() => setTab("sizing")} size="lg" style={{ minWidth: 140 }}>Next: Sizing →</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* ── SIZING TAB ── */}
+      {tab === "sizing" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+            <Label style={{ marginBottom: 8 }}>Max Loss in ₹</Label>
+            <Input type="number" value={maxLoss} onChange={e => setMaxLoss(e.target.value)} placeholder="e.g. 200000" style={{ fontSize: 18 }} />
+            <div style={{ fontSize: 11, color: C.textD, marginTop: 6 }}>Position will be sized so SL hits exactly this loss</div>
+          </div>
+
+          {lotsRec > 0 && (
+            <>
+              <div style={{ background: C.surface, border: `2px solid ${C.accent}40`, borderRadius: 10, padding: 20 }}>
+                <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1.5, marginBottom: 12 }}>RECOMMENDED POSITION</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {[
+                    { label: "Lots", value: String(lotsRec), color: C.accent, big: true },
+                    { label: "Total Capital", value: fmtInr(totalCapital), color: C.amber },
+                    { label: "Max Loss at SL", value: fmtInr(-actualSLLoss), color: C.red },
+                    { label: "Target Profit", value: fmtInr(targetProfitTotal), color: C.green },
+                    { label: "Lot Size", value: `${info.lotSize} units`, color: C.textM },
+                    { label: "Loss per Lot", value: fmtInr(-slPnlPerLot), color: C.red },
+                  ].map(s => (
+                    <div key={s.label} style={{ background: C.surface2, borderRadius: 8, padding: "12px 14px" }}>
+                      <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>{s.label}</div>
+                      <div style={{ fontSize: s.big ? 32 : 18, color: s.color, fontFamily: F_MONO, fontWeight: 700, marginTop: 4 }}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+                <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1, marginBottom: 10 }}>SOLD STRIKE OPTIMIZER</div>
+                <div style={{ fontSize: 11, color: C.textD, marginBottom: 10 }}>Current sell strike: {strikes.leg2} @ ₹{prems.leg2}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {[50, 100, 150, 200].map(prem => {
+                    const sellStrike = +strikes.leg2 || (entryN + 1000);
+                    const earlyPnl = ((+prems.leg1||0) - prem) + (prem - getDelta(sellStrike, targetN) * targetDist * 0.5);
+                    const expiryPnl = Math.min(sellStrike - entryN, targetDist) - (+prems.leg1||0) + prem;
+                    const isBest = earlyPnl > (((+prems.leg1||0) - +prems.leg2) + ((+prems.leg2) - getDelta(sellStrike, targetN) * targetDist * 0.5));
+                    return (
+                      <div key={prem} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, background: C.surface2, borderRadius: 6, padding: "10px 12px" }}>
+                        <div>
+                          <div style={{ fontSize: 9, color: C.textD }}>Sell @ ₹{prem}</div>
+                          <div style={{ fontSize: 12, color: C.text, fontFamily: F_MONO }}>Rcvd: ₹{prem}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 9, color: C.textD }}>Early exit</div>
+                          <div style={{ fontSize: 12, color: pnlColor(earlyPnl), fontFamily: F_MONO }}>₹{earlyPnl.toFixed(0)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 9, color: C.textD }}>At expiry</div>
+                          <div style={{ fontSize: 12, color: pnlColor(expiryPnl), fontFamily: F_MONO }}>₹{expiryPnl.toFixed(0)}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── P&L TABLE TAB ── */}
+      {tab === "pnl" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 8 }}>
+              <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>PRICE LEVEL</div>
+              <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>EARLY EXIT</div>
+              <div style={{ fontSize: 10, color: C.textD, letterSpacing: 1 }}>AT EXPIRY</div>
+            </div>
+            {levels.map((lvl, i) => {
+              const early = calcPnlAtPrice(lvl.price, false) * info.lotSize * Math.max(1, lotsRec);
+              const expiry = calcPnlAtPrice(lvl.price, true) * info.lotSize * Math.max(1, lotsRec);
+              const returnPct = totalCapital > 0 ? (early / totalCapital * 100).toFixed(1) : "—";
+              const isSL = i === 0, isTarget = i === 5;
+              return (
+                <div key={lvl.label} style={{ padding: "12px 16px", borderBottom: i < levels.length-1 ? `1px solid ${C.border}` : "none", background: isSL ? C.red+"08" : isTarget ? C.green+"08" : "transparent", display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 8, alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: isSL ? C.red : isTarget ? C.green : C.text, fontWeight: 600 }}>{lvl.label}</div>
+                    <div style={{ fontSize: 11, color: C.textD, fontFamily: F_MONO }}>{lvl.price.toFixed(0)} · {returnPct}%</div>
+                  </div>
+                  <div style={{ fontSize: 14, color: pnlColor(early), fontFamily: F_MONO, fontWeight: 700 }}>{fmtInr(early)}</div>
+                  <div style={{ fontSize: 14, color: pnlColor(expiry), fontFamily: F_MONO, fontWeight: 700 }}>{fmtInr(expiry)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── WHAT-IF SLIDER TAB ── */}
+      {tab === "whatif" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <Label>Underlying Price</Label>
+              <span style={{ fontSize: 20, color: C.accent, fontFamily: F_MONO, fontWeight: 700 }}>{sliderPrice.toFixed(0)}</span>
+            </div>
+            <input type="range" min={Math.max(0, entryN - 2000)} max={entryN + 2000} step={25} value={sliderPrice} onChange={e => setSliderPrice(+e.target.value)} style={{ width: "100%", accentColor: C.accent }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.textD, marginTop: 4 }}>
+              <span style={{ color: C.red }}>−2000</span><span>Entry {entryN}</span><span style={{ color: C.green }}>+2000</span>
+            </div>
+          </div>
+
+          {(() => {
+            const earlyPnl = calcPnlAtPrice(sliderPrice, false) * info.lotSize * Math.max(1, lotsRec);
+            const expiryPnl = calcPnlAtPrice(sliderPrice, true) * info.lotSize * Math.max(1, lotsRec);
+            const pctMove = entryN > 0 ? ((sliderPrice - entryN) / entryN * 100).toFixed(2) : 0;
+            const barWidth = Math.min(100, Math.abs(earlyPnl) / (maxLossN || 1) * 100);
+            return (
+              <div style={{ background: C.surface, border: `1px solid ${earlyPnl >= 0 ? C.green+"50" : C.red+"50"}`, borderRadius: 10, padding: 20 }}>
+                <div style={{ fontSize: 11, color: C.textD, marginBottom: 6 }}>Move: {+pctMove > 0 ? "+" : ""}{pctMove}% from entry</div>
+                <div style={{ height: 10, background: C.surface2, borderRadius: 5, marginBottom: 16, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${barWidth}%`, background: earlyPnl >= 0 ? C.green : C.red, transition: "width 0.2s" }} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div style={{ background: C.surface2, borderRadius: 8, padding: 14 }}>
+                    <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>EARLY EXIT P&L</div>
+                    <div style={{ fontSize: 24, color: pnlColor(earlyPnl), fontFamily: F_MONO, fontWeight: 700, marginTop: 6 }}>{fmtInr(earlyPnl)}</div>
+                    <div style={{ fontSize: 10, color: C.textD, marginTop: 2 }}>{totalCapital > 0 ? `${(earlyPnl/totalCapital*100).toFixed(1)}% return` : ""}</div>
+                  </div>
+                  <div style={{ background: C.surface2, borderRadius: 8, padding: 14 }}>
+                    <div style={{ fontSize: 9, color: C.textD, letterSpacing: 1 }}>AT EXPIRY P&L</div>
+                    <div style={{ fontSize: 24, color: pnlColor(expiryPnl), fontFamily: F_MONO, fontWeight: 700, marginTop: 6 }}>{fmtInr(expiryPnl)}</div>
+                    <div style={{ fontSize: 10, color: C.textD, marginTop: 2 }}>{totalCapital > 0 ? `${(expiryPnl/totalCapital*100).toFixed(1)}% return` : ""}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Sticky bottom bar */}
+      {lotsRec > 0 && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: C.surface, borderTop: `1px solid ${C.border}`, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", zIndex: 50 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 9, color: C.textD }}>LOTS</div>
+            <div style={{ fontSize: 18, color: C.accent, fontFamily: F_MONO, fontWeight: 700 }}>{lotsRec}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 9, color: C.textD }}>MAX LOSS</div>
+            <div style={{ fontSize: 14, color: C.red, fontFamily: F_MONO, fontWeight: 700 }}>{fmtInr(-actualSLLoss)}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 9, color: C.textD }}>TARGET PROFIT</div>
+            <div style={{ fontSize: 14, color: C.green, fontFamily: F_MONO, fontWeight: 700 }}>{fmtInr(targetProfitTotal)}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobile, recommendedRisk }) {
+  const [calcMode, setCalcMode] = useState("size"); // "size" | "options"
+
   // ── State ──
   const [platform, setPlatform] = useState("AB");
   const [tradeType, setTradeType] = useState("futures"); // "futures" | "options" | "stocks"
@@ -3275,6 +3724,15 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
 
   return (
     <div style={{ maxWidth: 720 }}>
+      {/* Sub-tab toggle */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 6 }}>
+        {[["size","Position Size"],["options","Options Strategy"]].map(([id, label]) => (
+          <button key={id} onClick={() => setCalcMode(id)} style={{ flex: 1, padding: "9px 0", background: calcMode === id ? C.accent : "transparent", color: calcMode === id ? C.bg : C.textM, border: "none", borderRadius: 5, fontSize: 13, fontWeight: 700, fontFamily: F_UI, cursor: "pointer" }}>{label}</button>
+        ))}
+      </div>
+
+      {calcMode === "options" && <OptionsCalculator settings={settings} hideCapital={hideCapital} isMobile={isMobile} />}
+      {calcMode === "size" && <>
       {showPreTradePopup && pendingTradeObj && (
         <PreTradeChecklistPopup
           trade={pendingTradeObj} isPaper={pendingTradeObj.isPaper || false}
@@ -3571,6 +4029,7 @@ function Calculator({ settings, trades, saveTrades, setPage, hideCapital, isMobi
           {qty <= 0 && diff > 0 ? "Stop too small" : qty <= 0 ? "Fill entry + SL" : `Save ${needsWholeLot ? qty : qty.toFixed(2)} ${isStocksCalc ? "shares" : "lots"}`}
         </Btn>
       </div>
+      </>}
     </div>
   );
 }
